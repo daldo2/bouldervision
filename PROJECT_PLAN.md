@@ -31,11 +31,11 @@ marks it "done", and the **key risks / unknowns** to watch.
 - [x] Pin dependencies in `requirements.txt`.
 - [x] Add `config/settings.yaml` for model paths, thresholds, and color ranges.
 - [x] Write the Phase 1 `hold_detector.py` proof of concept.
-- [ ] Run the detector on one test image and eyeball the output.
+- [x] Run the detector on one test image and eyeball the output.
 - [ ] Read up on YOLOv8 (Ultralytics) and the HSV color model.
 
 **Deliverable:** `python src/hold_detector.py <image>` produces
-`data/samples/output.jpg` with labeled boxes and prints a detection summary.
+`data/output/output.jpg` with labeled boxes and prints a detection summary.
 
 **Risks / unknowns**
 - Pretrained YOLOv8n knows nothing about climbing holds → low recall expected.

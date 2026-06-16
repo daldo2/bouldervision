@@ -61,6 +61,10 @@ draw_colors:
 # ---------------------------------------------------------------------------
 # Paths (relative to project root)
 # ---------------------------------------------------------------------------
+# data/ is split into two folders:
+#   input/  — images/videos you feed in (sample wall.jpg lives here)
+#   output/ — generated, annotated results (gitignored)
 paths:
-  samples_dir: "data/samples"
-  output_image: "data/samples/output.jpg"
+  input_dir: "data/input"
+  output_dir: "data/output"
+  output_image: "data/output/output.jpg"

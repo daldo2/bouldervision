@@ -41,7 +41,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> dict:
 def resolve_path(relative_path: str) -> str:
     """Turn a project-relative path (from config) into an absolute path.
 
-    Config stores paths like "data/samples/output.jpg" relative to the project
+    Config stores paths like "data/output/output.jpg" relative to the project
     root; this makes them absolute so they resolve regardless of the current
     working directory.
     """

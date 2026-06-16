@@ -20,15 +20,12 @@ ENV/
 models/*.pt
 models/*.onnx
 
-# --- Data: raw + generated outputs are large; never commit ---
-# (but keep the empty dirs in git via their .gitkeep so the structure survives a clone)
-data/raw/*
-!data/raw/.gitkeep
-data/annotated/*
-!data/annotated/.gitkeep
-data/samples/output*.jpg
-data/samples/output*.png
-data/samples/output*.mp4
+# --- Data ---
+# input/  holds the things you analyze. Small sample images (e.g. wall.jpg) are
+#         tracked; large media (videos) are not. output/ is fully generated, so
+#         nothing in it is committed except the .gitkeep that preserves the dir.
+data/output/*
+!data/output/.gitkeep
 *.mp4
 *.mov
 *.avi

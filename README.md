@@ -37,7 +37,7 @@ python scripts/run_analysis.py --image path/to/climbing_wall.jpg
 ```
 
 The first run downloads the pretrained `yolov8n.pt` weights (~6 MB) and writes
-an annotated image to `data/samples/output.jpg`.
+an annotated image to `data/output/output.jpg`.
 
 > **Note on the MVP detector:** Phase 1 uses a *pretrained* YOLOv8n model that
 > was trained on the generic COCO dataset, not on climbing holds. It will not
@@ -48,9 +48,11 @@ an annotated image to `data/samples/output.jpg`.
 ## Project layout
 
 ```
-boulervision/
+bouldervision/
 ├── config/settings.yaml     # model paths, thresholds, color ranges
-├── data/                    # raw videos, annotations, samples
+├── data/
+│   ├── input/               # images/videos to analyze (sample wall.jpg here)
+│   └── output/              # generated annotated results (gitignored)
 ├── models/                  # trained weights live here (gitignored)
 ├── src/                     # library code
 │   ├── hold_detector.py     # hold detection + color classification

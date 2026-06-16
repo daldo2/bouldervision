@@ -6,8 +6,8 @@ Phase 1 supports image analysis (hold detection + color classification).
 Video analysis (Phase 3) is wired but marked experimental.
 
 Examples:
-    python scripts/run_analysis.py --image data/samples/wall.jpg
-    python scripts/run_analysis.py --video data/raw/climb.mp4 --output out.mp4
+    python scripts/run_analysis.py --image data/input/wall.jpg
+    python scripts/run_analysis.py --video data/input/climb.mp4 --output data/output/climb_out.mp4
 """
 
 from __future__ import annotations

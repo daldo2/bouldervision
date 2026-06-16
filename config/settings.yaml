@@ -35,26 +35,35 @@ pose:
 # A crop is assigned the color whose ranges cover the most of its pixels.
 colors:
   red:
-    - { lower: [0, 70, 50],    upper: [10, 255, 255] }
-    - { lower: [170, 70, 50],  upper: [179, 255, 255] }   # red wraps the hue circle
+    - { lower: [0, 80, 50],    upper: [8, 255, 255] }
+    - { lower: [172, 80, 50],  upper: [179, 255, 255] }   # red wraps the hue circle
+  orange:
+    - { lower: [9, 90, 90],    upper: [22, 255, 255] }    # sits between red and yellow
   yellow:
-    - { lower: [20, 70, 70],   upper: [35, 255, 255] }
+    - { lower: [23, 70, 70],   upper: [34, 255, 255] }
   green:
-    - { lower: [36, 50, 50],   upper: [85, 255, 255] }
+    - { lower: [35, 50, 50],   upper: [85, 255, 255] }
   blue:
     - { lower: [86, 60, 50],   upper: [125, 255, 255] }
   purple:
     - { lower: [126, 40, 40],  upper: [160, 255, 255] }
+  white:
+    - { lower: [0, 0, 200],    upper: [179, 40, 255] }     # high value, very low saturation
   black:
-    - { lower: [0, 0, 0],      upper: [179, 255, 60] }     # low value = dark/black
+    - { lower: [0, 0, 0],      upper: [179, 255, 55] }     # low value = dark/black
+# NOTE: ranges are provisional — tuned by eye for typical gym colors. Once the
+# fine-tuned detector gives real hold crops, calibrate with scripts/inspect_hsv.py.
+# Pink/salmon holds currently fall under red; split them out later if needed.
 
 # BGR colors used when drawing each label's bounding box (OpenCV is BGR, not RGB).
 draw_colors:
   red:    [0, 0, 255]
+  orange: [0, 140, 255]
   yellow: [0, 255, 255]
   green:  [0, 255, 0]
   blue:   [255, 0, 0]
   purple: [255, 0, 200]
+  white:  [255, 255, 255]
   black:  [40, 40, 40]
   unknown: [200, 200, 200]
 

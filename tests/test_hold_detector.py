@@ -64,6 +64,25 @@ def test_classify_black(config):
     assert color == "black"
 
 
+def test_classify_orange(config):
+    crop = solid_color_crop((0, 140, 255))  # BGR orange
+    color, _ = utils.classify_color(crop, config["colors"])
+    assert color == "orange"
+
+
+def test_classify_white(config):
+    crop = solid_color_crop((255, 255, 255))  # white
+    color, _ = utils.classify_color(crop, config["colors"])
+    assert color == "white"
+
+
+def test_orange_not_confused_with_red_or_yellow(config):
+    # Orange must win over its hue-circle neighbors.
+    crop = solid_color_crop((0, 140, 255))
+    color, _ = utils.classify_color(crop, config["colors"])
+    assert color not in ("red", "yellow")
+
+
 def test_empty_crop_is_unknown(config):
     empty = np.zeros((0, 0, 3), dtype=np.uint8)
     color, coverage = utils.classify_color(empty, config["colors"])

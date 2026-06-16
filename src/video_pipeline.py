@@ -284,21 +284,35 @@ def main() -> None:
         print(f"Annotated video: {args.out}")
 
 
-def _filter_by_color(frame, boxes, color, config):
-    """Keep only holds whose dominant color matches `color` — isolate one route.
+def _filter_by_color(frame, boxes, color, config, include_volumes=True):
+    """Keep one route's holds: those matching `color`, PLUS shared volumes.
 
-    Uses the Phase-2 color machinery (per-hold Lab + nearest palette name). Prints
-    which colors are present so the user can pick a valid one.
+    A route's hand-holds are one color, but climbers still stand on neutral
+    volumes — so by default we also keep big boxes (volumes, by area) regardless
+    of colour, so footholds on volumes still register. Uses the Phase-2 colour
+    machinery; prints which colours are present so the user can pick a valid one.
     """
     import route_extractor as rex
     refs = utils.reference_labs(config["draw_colors"])
     chroma_min = config.get("color_naming", {}).get("chroma_min", 12)
+    vol_frac = config.get("filter", {}).get("volume_area_frac", 0.04)
+    img_area = float(frame.shape[0] * frame.shape[1])
+
     holds = rex.build_holds(frame, [(*b, 1.0) for b in boxes])
-    named = [(h.box, utils.nearest_color_name(h.lab, refs, chroma_min)) for h in holds]
-    present = Counter(n for _, n in named)
+    present, kept, vols = Counter(), [], 0
+    for h in holds:
+        name = utils.nearest_color_name(h.lab, refs, chroma_min)
+        present[name] += 1
+        x1, y1, x2, y2 = h.box
+        is_volume = include_volumes and ((x2 - x1) * (y2 - y1) / img_area) >= vol_frac
+        if name == color:
+            kept.append(h.box)
+        elif is_volume:
+            kept.append(h.box)
+            vols += 1
     print(f"     route filter: colors on wall = {dict(present.most_common())}")
-    kept = [box for box, n in named if n == color]
-    print(f"     route filter: keeping {len(kept)} '{color}' holds (of {len(boxes)} detected)")
+    print(f"     route filter: keeping {len(kept) - vols} '{color}' holds + {vols} volumes "
+          f"(of {len(boxes)} detected)")
     return kept
 
 
@@ -307,7 +321,7 @@ def _draw_frame(frame, hold_boxes, poses, contacts, points=None) -> None:
     touched = {idx for idx in contacts.values() if idx is not None}
     for i, (x1, y1, x2, y2) in enumerate(hold_boxes):
         color = (0, 255, 0) if i in touched else (160, 160, 160)
-        thickness = 3 if i in touched else 1
+        thickness = 2 if i in touched else 1   # thin borders; big boxes looked heavy at 3
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
     for pose in poses:

@@ -1,29 +1,27 @@
 # Color-naming ground truth for the evaluation harness (scripts/eval_colors.py).
 #
-# For each image, `colors_present` is the set of HOLD/ROUTE colors that ACTUALLY
-# exist on that wall (your eyes are the ground truth). The harness then checks
-# whether the pipeline recovers them (recall) without inventing colors (precision).
+# `colors_present` = HOLD colors actually on that wall (your eyes are the truth).
+# NOTE: black is almost always only on VOLUMES here (which the pipeline sets
+# aside), so it is NOT listed as a hold color unless real black holds exist.
+# Owner-verified 2026-06-16. Some entries still tentative — see inline notes.
 #
-# >>> PLEASE CORRECT THESE <<< — the values below are Claude's guess from
-# thumbnails. The ones that really matter (and that we're trying to fix) are
-# GREEN and PURPLE: add/remove them where they are/aren't actually present.
-# Use names from the palette: red orange yellow green blue purple white black.
-# (Real gym photos are gitignored; this file lives on your machine.)
+# Palette names: red orange yellow green blue purple pink cyan white black.
+# (pink + cyan were missing from the palette — that's a known gap we're fixing.)
 
 min_holds: 2          # a color must label >= this many holds to count as "found"
 
 images:
   - file: 8fd31786-ceae-4ab7-b61f-374997f60de2.jpeg   # close, front-on (volumes)
-    colors_present: [red, white, blue, yellow]
+    colors_present: [red, white, blue, yellow]         # black = volumes only
 
   - file: 37c8437e-e31d-44a6-a8ce-6dafe1165a31.jpeg   # medium distance
-    colors_present: [red, blue, yellow, white, black, green]
+    colors_present: [red, blue, yellow, white, pink, cyan]   # black = volumes only
 
-  - file: 86d728a9-3b12-4a3f-a0fb-bbafaf7342f5.jpeg   # big wall, wide shot (hard)
-    colors_present: [red, yellow, white, blue, black, green, purple, orange]
+  - file: 86d728a9-3b12-4a3f-a0fb-bbafaf7342f5.jpeg   # big wall, wide (hard)
+    colors_present: [red, yellow, white, blue, purple, orange, pink]  # NO black; turquoise = volumes
 
   - file: b1dbc819-79f3-4b5c-ac99-a8b95f1bd24e.jpeg   # corridor, steep angle (hard)
-    colors_present: [blue, red, yellow, white, black, green]
+    colors_present: [blue, red, yellow, white, green]  # green is far background (low detectability)
 
   - file: c5e0fe3a-7a51-4235-a530-65261cf83da5.jpeg   # medium distance
-    colors_present: [red, yellow, blue, white, black]
+    colors_present: [red, yellow, blue, white, pink, cyan, green]

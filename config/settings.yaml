@@ -59,8 +59,9 @@ routes:
 # Color naming — turning a hold's Lab color into a name (red/blue/black/...).
 # ---------------------------------------------------------------------------
 color_naming:
-  chroma_min: 16            # below this Lab chroma a hold is "neutral" (black/white/gray);
-                            # lower = name more muted/dim holds as colored, but riskier (noise)
+  chroma_min: 12            # below this Lab chroma a hold is "neutral" (black/white/gray);
+                            # tuned via scripts/eval_colors.py — recall 0.90 @ this value on the
+                            # eval set; lower recovers more muted holds but adds noise (prec drops)
 
 # ---------------------------------------------------------------------------
 # Perspective rectification — for photos taken at a steep angle to the wall.
@@ -88,11 +89,15 @@ colors:
   yellow:
     - { lower: [23, 70, 70],   upper: [34, 255, 255] }
   green:
-    - { lower: [35, 50, 50],   upper: [85, 255, 255] }
+    - { lower: [35, 50, 50],   upper: [82, 255, 255] }
+  cyan:
+    - { lower: [83, 40, 50],   upper: [99, 255, 255] }    # turquoise: between green and blue
   blue:
-    - { lower: [86, 60, 50],   upper: [125, 255, 255] }
+    - { lower: [100, 60, 50],  upper: [125, 255, 255] }
   purple:
-    - { lower: [126, 40, 40],  upper: [160, 255, 255] }
+    - { lower: [126, 40, 40],  upper: [155, 255, 255] }
+  pink:
+    - { lower: [156, 35, 90],  upper: [171, 255, 255] }   # hot pink/rose: magenta-red, lighter
   white:
     - { lower: [0, 0, 200],    upper: [179, 40, 255] }     # high value, very low saturation
   black:
@@ -107,8 +112,10 @@ draw_colors:
   orange: [0, 140, 255]
   yellow: [0, 255, 255]
   green:  [0, 255, 0]
+  cyan:   [255, 255, 0]      # turquoise/cyan — was missing, holds fell through to blue/black
   blue:   [255, 0, 0]
   purple: [255, 0, 200]
+  pink:   [147, 20, 255]     # hot pink/rose — was missing, holds fell through to red/purple/black
   white:  [255, 255, 255]
   black:  [40, 40, 40]
   unknown: [200, 200, 200]

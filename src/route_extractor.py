@@ -222,7 +222,7 @@ def extract_routes(
     references: Optional[Dict[str, np.ndarray]] = None,
     adaptive_spatial: bool = False,
     spatial_scale_eps: float = 8.0,
-    chroma_min: float = 16.0,
+    chroma_min: float = 12.0,
 ) -> List[Route]:
     """Turn a flat list of holds into named routes.
 

@@ -25,7 +25,10 @@ detection:
 
 pose:
   confidence: 0.50          # minimum keypoint confidence to trust a joint
-  touch_distance_px: 40     # hand/foot within this many px of a hold = "touching"
+  touch_distance_px: 40     # hand/foot within this many px of a hold = candidate contact
+  reach_frac: 0.33          # extrapolate past wrist/ankle toward the hand/foot by this fraction
+  contact_max_speed_px: 12  # a limb moving faster than this (px/frame) is reaching, not gripping
+  primary_min_seconds: 1.0  # a hold held >= this long counts as a real "route hold" in the summary
 
 # ---------------------------------------------------------------------------
 # Detection post-processing — sort raw detections into holds vs. wall furniture

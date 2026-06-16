@@ -41,6 +41,16 @@ CONTACT_LIMBS = {
     "right_foot": 16,  # right_ankle
 }
 
+# (base joint, tip joint) per limb. The real contact point (hand/foot) is BEYOND
+# the tip joint, continuing the base->tip direction — we extrapolate to it so a
+# wrist keypoint isn't judged against a hold the fingers are actually on.
+LIMB_JOINTS = {
+    "left_hand": (7, 9),    # left_elbow  -> left_wrist
+    "right_hand": (8, 10),  # right_elbow -> right_wrist
+    "left_foot": (13, 15),  # left_knee   -> left_ankle
+    "right_foot": (14, 16), # right_knee  -> right_ankle
+}
+
 
 @dataclass
 class FramePose:
@@ -123,6 +133,77 @@ def touched_holds(
                 nearest_dist, nearest_idx = dist, i
 
         result[limb] = nearest_idx if nearest_dist <= touch_distance_px else None
+    return result
+
+
+def extremity_point(
+    keypoints: np.ndarray, limb: str, reach_frac: float = 0.33, min_joint_conf: float = 0.3
+) -> Tuple[float, float, float]:
+    """Estimate a limb's actual contact point (hand/foot), not just the joint.
+
+    Continues the base->tip direction (elbow->wrist, knee->ankle) a fraction
+    `reach_frac` past the tip, so the point sits closer to where the hand/foot
+    really meets the wall. If the base joint isn't confidently seen we can't get
+    a direction, so we fall back to the tip joint itself. Returns (x, y, conf)
+    where conf is the tip joint's confidence.
+    """
+    base_i, tip_i = LIMB_JOINTS[limb]
+    bx, by, bc = keypoints[base_i]
+    tx, ty, tc = keypoints[tip_i]
+    if bc < min_joint_conf:
+        return float(tx), float(ty), float(tc)
+    return float(tx + reach_frac * (tx - bx)), float(ty + reach_frac * (ty - by)), float(tc)
+
+
+def limb_points(
+    pose: FramePose, reach_frac: float = 0.33, min_joint_conf: float = 0.3
+) -> Dict[str, Tuple[float, float, float]]:
+    """Extremity contact points for all four contact limbs of one pose."""
+    return {
+        limb: extremity_point(pose.keypoints, limb, reach_frac, min_joint_conf)
+        for limb in CONTACT_LIMBS
+    }
+
+
+def nearest_hold_index(
+    x: float, y: float, hold_boxes: List[Tuple[int, int, int, int]], touch_distance_px: float
+) -> Optional[int]:
+    """Index of the nearest hold within `touch_distance_px` of (x, y), else None."""
+    nearest_idx, nearest = None, float("inf")
+    for i, box in enumerate(hold_boxes):
+        d = point_to_box_distance(x, y, box)
+        if d < nearest:
+            nearest, nearest_idx = d, i
+    return nearest_idx if nearest <= touch_distance_px else None
+
+
+def frame_contacts(
+    points: Dict[str, Tuple[float, float, float]],
+    prev_points: Optional[Dict[str, Tuple[float, float, float]]],
+    hold_boxes: List[Tuple[int, int, int, int]],
+    touch_distance_px: float,
+    max_speed_px: float,
+    min_confidence: float,
+) -> Dict[str, Optional[int]]:
+    """Decide each limb's held hold this frame, gating out reaching/hovering.
+
+    A limb counts as gripping only if it is (a) confidently seen, (b) *anchored*
+    — moving slower than `max_speed_px` from the previous frame, since a planted
+    hand barely moves while a reaching/hovering one travels — and (c) within
+    `touch_distance_px` of a hold. This removes most false contacts where a limb
+    merely passes near a hold in the 2D projection.
+    """
+    result: Dict[str, Optional[int]] = {}
+    for limb, (x, y, c) in points.items():
+        if c < min_confidence:
+            result[limb] = None
+            continue
+        if prev_points is not None and prev_points.get(limb) is not None:
+            px, py, _ = prev_points[limb]
+            if math.hypot(x - px, y - py) > max_speed_px:
+                result[limb] = None  # moving too fast to be gripping
+                continue
+        result[limb] = nearest_hold_index(x, y, hold_boxes, touch_distance_px)
     return result
 
 

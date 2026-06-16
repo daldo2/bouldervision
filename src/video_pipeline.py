@@ -74,6 +74,7 @@ def analyze_video(
     detect_frame: int = 0,
     start_frame: int = 0,
     max_frames: Optional[int] = None,
+    stabilize: bool = False,
 ) -> List[FrameAnalysis]:
     """Run the full analysis pipeline over a video file.
 
@@ -130,15 +131,24 @@ def analyze_video(
     # Detect the static holds once on a chosen (ideally empty-wall) frame, so the
     # hold indices are stable for the whole clip.
     hold_boxes: List[tuple] = []
+    ref_boxes: List[tuple] = []
+    stabilizer = None
     if detect_every == 0:
         cap.set(cv2.CAP_PROP_POS_FRAMES, detect_frame)
         ok, dframe = cap.read()
         if ok:
             hold_boxes = detect_at(dframe)
+            ref_boxes = list(hold_boxes)
+            if stabilize:
+                import stabilize as stab  # lazy: only needed for handheld clips
+                stabilizer = stab.CameraStabilizer(dframe)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     frame_index = start_frame
     processed = 0
+    reach = pose_cfg.get("reach_frac", 0.33)
+    max_speed = pose_cfg.get("contact_max_speed_px", 12)
+    prev_points = None  # extremity points from the previous frame, for velocity gating
 
     try:
         while True:
@@ -149,20 +159,25 @@ def analyze_video(
             # Moving-camera mode: periodically re-detect (indices not stable).
             if detect_every > 0 and frame_index % detect_every == 0:
                 hold_boxes = detect_at(frame)
+            # Handheld: warp the static reference boxes to follow the camera.
+            elif stabilizer is not None:
+                hold_boxes = stabilizer.warp_boxes(ref_boxes, frame)
 
-            # Estimate the climber's pose and work out limb→hold contacts.
+            # Estimate the climber's pose, then resolve gripping contacts using
+            # extremity points + a velocity gate (anchored limb = gripping).
             poses = pose_estimator.estimate_pose(pose_model, frame, pose_cfg["confidence"])
             contacts = {limb: None for limb in pose_estimator.CONTACT_LIMBS}
+            points = None
             if poses:
-                contacts = pose_estimator.touched_holds(
-                    poses[0],  # assume the most prominent person is the climber
-                    hold_boxes,
-                    pose_cfg["touch_distance_px"],
-                    pose_cfg["confidence"],
+                points = pose_estimator.limb_points(poses[0], reach)
+                contacts = pose_estimator.frame_contacts(
+                    points, prev_points, hold_boxes,
+                    pose_cfg["touch_distance_px"], max_speed, pose_cfg["confidence"],
                 )
+            prev_points = points  # None on missing pose -> next frame won't gate on a stale point
 
             if writer is not None:
-                _draw_frame(frame, hold_boxes, poses, contacts)
+                _draw_frame(frame, hold_boxes, poses, contacts, points)
                 writer.write(frame)
 
             timeline.append(FrameAnalysis(frame_index=frame_index, contacts=contacts))
@@ -178,18 +193,23 @@ def analyze_video(
     return timeline
 
 
-def print_summary(timeline: List["FrameAnalysis"], min_frames: int = 3) -> None:
-    """Print a human-readable contact summary for a finished timeline."""
-    used = holds_used(timeline, min_frames=min_frames)
+def print_summary(timeline: List["FrameAnalysis"], primary_min_frames: int = 30) -> None:
+    """Print a human-readable contact summary for a finished timeline.
+
+    `primary_min_frames` is the dwell threshold for a hold to count as a real
+    "route hold" (vs. a fleeting near-pass) — set it from fps (e.g. 1 second).
+    """
+    primary = holds_used(timeline, min_frames=primary_min_frames)
     per_limb = summarize_contacts(timeline)
     print("-" * 40)
     print(f"Analyzed {len(timeline)} frames")
     contact_frames = sum(1 for f in timeline if any(v is not None for v in f.contacts.values()))
-    print(f"Frames with >=1 limb on a hold: {contact_frames}")
-    print(f"Distinct holds used (>= {min_frames} frames): {len(used)}  {sorted(used)}")
+    print(f"Frames with >=1 limb gripping: {contact_frames}")
+    print(f"Route holds (held >= {primary_min_frames} frames): {len(primary)}  {sorted(primary)}")
     for limb in ("left_hand", "right_hand", "left_foot", "right_foot"):
-        top = per_limb.get(limb, Counter()).most_common(4)
-        pretty = ", ".join(f"hold#{i}:{n}f" for i, n in top) or "—"
+        # Only show this limb's holds that clear the dwell threshold.
+        top = [(i, n) for i, n in per_limb.get(limb, Counter()).most_common() if n >= primary_min_frames]
+        pretty = ", ".join(f"hold#{i}:{n}f" for i, n in top[:5]) or "—"
         print(f"  {limb:11} {pretty}")
 
 
@@ -205,19 +225,27 @@ def main() -> None:
     parser.add_argument("--max-frames", type=int, default=None, help="Analyze at most N frames.")
     parser.add_argument("--detect-every", type=int, default=0,
                         help="Moving camera: re-detect holds every N frames (default 0 = once).")
+    parser.add_argument("--stabilize", action="store_true",
+                        help="Handheld camera: warp the static holds to follow the camera each frame.")
     args = parser.parse_args()
 
     timeline = analyze_video(
         args.video, output_path=args.out, config_path=args.config,
         detect_every=args.detect_every, detect_frame=args.detect_frame,
-        start_frame=args.start_frame, max_frames=args.max_frames,
+        start_frame=args.start_frame, max_frames=args.max_frames, stabilize=args.stabilize,
     )
-    print_summary(timeline)
+    # Translate the "real route hold" dwell threshold from seconds to frames.
+    cap = cv2.VideoCapture(args.video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    cap.release()
+    cfg = utils.load_config(args.config) if args.config else utils.load_config()
+    min_frames = max(1, round(cfg["pose"].get("primary_min_seconds", 1.0) * fps))
+    print_summary(timeline, primary_min_frames=min_frames)
     if args.out:
         print(f"Annotated video: {args.out}")
 
 
-def _draw_frame(frame, hold_boxes, poses, contacts) -> None:
+def _draw_frame(frame, hold_boxes, poses, contacts, points=None) -> None:
     """Overlay holds (touched ones highlighted), keypoints, and contacts in place."""
     touched = {idx for idx in contacts.values() if idx is not None}
     for i, (x1, y1, x2, y2) in enumerate(hold_boxes):
@@ -229,6 +257,14 @@ def _draw_frame(frame, hold_boxes, poses, contacts) -> None:
         for x, y, conf in pose.keypoints:
             if conf > 0:
                 cv2.circle(frame, (int(x), int(y)), 3, (0, 200, 255), -1)
+
+    # The estimated hand/foot contact points: green when gripping, red otherwise.
+    if points:
+        for limb, (x, y, c) in points.items():
+            if c <= 0:
+                continue
+            gripping = contacts.get(limb) is not None
+            cv2.circle(frame, (int(x), int(y)), 7, (0, 255, 0) if gripping else (0, 0, 255), 2)
 
 
 if __name__ == "__main__":

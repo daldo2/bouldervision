@@ -27,14 +27,23 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--image", help="Path to a still image to analyze.")
     group.add_argument("--video", help="Path to a video to analyze (Phase 3, experimental).")
+    parser.add_argument(
+        "--routes",
+        action="store_true",
+        help="Image mode: group holds into routes (Phase 2) instead of just labeling colors.",
+    )
     parser.add_argument("--output", help="Output path (video mode).")
     parser.add_argument("--config", help="Optional path to settings.yaml.")
     args = parser.parse_args()
 
     if args.image:
         import hold_detector
-        output = hold_detector.run(args.image, args.config)
-        print(f"\nSaved annotated image to: {output}")
+        if args.routes:
+            output = hold_detector.run_routes(args.image, args.config)
+            print(f"\nSaved route map to: {output}")
+        else:
+            output = hold_detector.run(args.image, args.config)
+            print(f"\nSaved annotated image to: {output}")
     else:
         import video_pipeline
         print("Video mode is experimental (Phase 3 scaffold).")

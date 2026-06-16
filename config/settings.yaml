@@ -85,4 +85,5 @@ draw_colors:
 paths:
   input_dir: "data/input"
   output_dir: "data/output"
-  output_image: "data/output/output.jpg"
+  output_image: "data/output/output.jpg"     # hold detection + color labels
+  routes_image: "data/output/routes.jpg"      # holds grouped into routes

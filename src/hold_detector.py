@@ -243,12 +243,66 @@ def run(image_path: str, config_path: str | None = None) -> str:
     return output_path
 
 
+def run_routes(image_path: str, config_path: str | None = None) -> str:
+    """End-to-end Phase 1+2: detect holds, read their colors, group into routes,
+    draw the route map, save it. Returns the output path.
+
+    This is the full pipeline the project is building toward. It needs a real
+    hold detector to be useful — with generic yolov8n it still runs, just on
+    whatever boxes COCO produces.
+    """
+    import route_extractor as rex  # imported here; pulls sklearn, not torch
+
+    config = utils.load_config(config_path) if config_path else utils.load_config()
+    image = utils.read_image(image_path)
+
+    # 1. Detect candidate holds (boxes only — color comes next).
+    model = load_detector(config["models"]["hold_detector"])
+    det = config["detection"]
+    boxes = detect_holds(model, image, det["confidence"], det["iou"], det["max_detections"])
+
+    # 2. Read each hold's real color (Lab) and 3. group into routes.
+    print("[3/5] Reading hold colors and grouping into routes...")
+    holds = rex.build_holds(image, boxes)
+    refs = utils.reference_labs(config["draw_colors"])
+    rcfg = config["routes"]
+    routes = rex.extract_routes(
+        holds,
+        color_eps=rcfg["color_eps"],
+        spatial_eps_px=rcfg["spatial_eps_px"],
+        spatial_min_holds=rcfg["spatial_min_holds"],
+        references=refs,
+    )
+
+    # 4. Draw and save the route map.
+    annotated = utils.draw_routes(image, routes)
+    output_path = utils.resolve_path(config["paths"]["routes_image"])
+    print(f"[4/5] Saving route map to: {output_path}")
+    utils.save_image(annotated, output_path)
+
+    # 5. Summary.
+    print("[5/5] Route summary")
+    print("-" * 40)
+    if not routes:
+        print("No routes found (no holds detected — is a hold-trained model set?).")
+    else:
+        print(f"Found {len(routes)} route(s) from {len(holds)} holds:")
+        for i, r in enumerate(routes, start=1):
+            print(f"  #{i}  {r.color_name or '?':<8} {r.hold_count} holds")
+    return output_path
+
+
 def main() -> None:
-    """Parse the command-line argument (image path) and run the pipeline."""
+    """Parse the command-line arguments and run the chosen pipeline."""
     parser = argparse.ArgumentParser(
         description="Detect climbing holds in an image and classify them by color."
     )
     parser.add_argument("image", help="Path to the input climbing-wall image.")
+    parser.add_argument(
+        "--routes",
+        action="store_true",
+        help="Group detected holds into routes (Phase 2) and draw a route map.",
+    )
     parser.add_argument(
         "--config",
         default=None,
@@ -256,7 +310,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    output_path = run(args.image, args.config)
+    if args.routes:
+        output_path = run_routes(args.image, args.config)
+    else:
+        output_path = run(args.image, args.config)
     print("-" * 40)
     print(f"Done. Open {output_path} to view the result.")
 

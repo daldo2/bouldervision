@@ -12,8 +12,8 @@ models:
   hold_detector: "best.pt"
 
   # Pose model used by pose_estimator.py (Phase 3). yolov8x-pose is the most
-  # accurate; switch to yolov8n-pose for speed.
-  pose_estimator: "yolov8x-pose.pt"
+  # accurate; yolov8n-pose is much faster — required here since there's no GPU.
+  pose_estimator: "yolov8n-pose.pt"
 
 # ---------------------------------------------------------------------------
 # Inference thresholds

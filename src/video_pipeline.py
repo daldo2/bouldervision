@@ -70,7 +70,10 @@ def analyze_video(
     video_path: str,
     output_path: Optional[str] = None,
     config_path: Optional[str] = None,
-    detect_every: int = 30,
+    detect_every: int = 0,
+    detect_frame: int = 0,
+    start_frame: int = 0,
+    max_frames: Optional[int] = None,
 ) -> List[FrameAnalysis]:
     """Run the full analysis pipeline over a video file.
 
@@ -78,9 +81,15 @@ def analyze_video(
         video_path: input video.
         output_path: where to write the annotated video (optional).
         config_path: optional settings.yaml override.
-        detect_every: re-run hold detection every N frames. Holds are static,
-            so we don't need to detect them on every single frame — this saves
-            a lot of compute on long videos.
+        detect_every: re-run hold detection every N frames. 0 (default) means
+            detect ONCE (at `detect_frame`) and reuse — holds are static and the
+            box *indices* must stay stable for the contact summary to mean
+            anything. Use a positive value only with hold tracking (TODO) or a
+            moving camera.
+        detect_frame: which frame to detect holds on (use an empty-wall frame to
+            avoid the climber occluding holds).
+        start_frame: first frame to analyze (skip a long empty intro).
+        max_frames: stop after this many analyzed frames (None = whole clip).
 
     Returns:
         A per-frame timeline (list of FrameAnalysis).
@@ -102,7 +111,6 @@ def analyze_video(
         writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     timeline: List[FrameAnalysis] = []
-    frame_index = 0
 
     # Load both models once, lazily (torch is heavy and only needed here).
     import hold_detector
@@ -113,7 +121,24 @@ def analyze_video(
     det = config["detection"]
     pose_cfg = config["pose"]
 
-    hold_boxes: List[tuple] = []  # static holds, refreshed every `detect_every` frames
+    def detect_at(frame) -> List[tuple]:
+        boxes = hold_detector.detect_holds(
+            detector, frame, det["confidence"], det["iou"], det["max_detections"]
+        )
+        return [(x1, y1, x2, y2) for (x1, y1, x2, y2, _conf) in boxes]
+
+    # Detect the static holds once on a chosen (ideally empty-wall) frame, so the
+    # hold indices are stable for the whole clip.
+    hold_boxes: List[tuple] = []
+    if detect_every == 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, detect_frame)
+        ok, dframe = cap.read()
+        if ok:
+            hold_boxes = detect_at(dframe)
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    frame_index = start_frame
+    processed = 0
 
     try:
         while True:
@@ -121,12 +146,9 @@ def analyze_video(
             if not ok:
                 break  # end of video
 
-            # Holds don't move, so only re-detect periodically (cheap on long clips).
-            if frame_index % detect_every == 0:
-                boxes = hold_detector.detect_holds(
-                    detector, frame, det["confidence"], det["iou"], det["max_detections"]
-                )
-                hold_boxes = [(x1, y1, x2, y2) for (x1, y1, x2, y2, _conf) in boxes]
+            # Moving-camera mode: periodically re-detect (indices not stable).
+            if detect_every > 0 and frame_index % detect_every == 0:
+                hold_boxes = detect_at(frame)
 
             # Estimate the climber's pose and work out limb→hold contacts.
             poses = pose_estimator.estimate_pose(pose_model, frame, pose_cfg["confidence"])
@@ -145,12 +167,54 @@ def analyze_video(
 
             timeline.append(FrameAnalysis(frame_index=frame_index, contacts=contacts))
             frame_index += 1
+            processed += 1
+            if max_frames is not None and processed >= max_frames:
+                break
     finally:
         cap.release()
         if writer is not None:
             writer.release()
 
     return timeline
+
+
+def print_summary(timeline: List["FrameAnalysis"], min_frames: int = 3) -> None:
+    """Print a human-readable contact summary for a finished timeline."""
+    used = holds_used(timeline, min_frames=min_frames)
+    per_limb = summarize_contacts(timeline)
+    print("-" * 40)
+    print(f"Analyzed {len(timeline)} frames")
+    contact_frames = sum(1 for f in timeline if any(v is not None for v in f.contacts.values()))
+    print(f"Frames with >=1 limb on a hold: {contact_frames}")
+    print(f"Distinct holds used (>= {min_frames} frames): {len(used)}  {sorted(used)}")
+    for limb in ("left_hand", "right_hand", "left_foot", "right_foot"):
+        top = per_limb.get(limb, Counter()).most_common(4)
+        pretty = ", ".join(f"hold#{i}:{n}f" for i, n in top) or "—"
+        print(f"  {limb:11} {pretty}")
+
+
+def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Analyze a climbing video: pose + limb→hold contacts.")
+    parser.add_argument("video", help="Path to the input video.")
+    parser.add_argument("--out", default=None, help="Write an annotated video here.")
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--detect-frame", type=int, default=0,
+                        help="Frame to detect the (static) holds on — pick an empty-wall frame.")
+    parser.add_argument("--start-frame", type=int, default=0, help="First frame to analyze.")
+    parser.add_argument("--max-frames", type=int, default=None, help="Analyze at most N frames.")
+    parser.add_argument("--detect-every", type=int, default=0,
+                        help="Moving camera: re-detect holds every N frames (default 0 = once).")
+    args = parser.parse_args()
+
+    timeline = analyze_video(
+        args.video, output_path=args.out, config_path=args.config,
+        detect_every=args.detect_every, detect_frame=args.detect_frame,
+        start_frame=args.start_frame, max_frames=args.max_frames,
+    )
+    print_summary(timeline)
+    if args.out:
+        print(f"Annotated video: {args.out}")
 
 
 def _draw_frame(frame, hold_boxes, poses, contacts) -> None:
@@ -165,3 +229,7 @@ def _draw_frame(frame, hold_boxes, poses, contacts) -> None:
         for x, y, conf in pose.keypoints:
             if conf > 0:
                 cv2.circle(frame, (int(x), int(y)), 3, (0, 200, 255), -1)
+
+
+if __name__ == "__main__":
+    main()

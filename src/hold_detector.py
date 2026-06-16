@@ -267,9 +267,12 @@ def run(image_path: str, config_path: str | None = None) -> str:
     return output_path
 
 
-def run_routes(image_path: str, config_path: str | None = None) -> str:
+def run_routes(image_path: str, config_path: str | None = None, corners=None) -> str:
     """End-to-end Phase 1+2: detect holds, read their colors, group into routes,
     draw the route map, save it. Returns the output path.
+
+    `corners` (4 [x, y] wall points) overrides config to rectify a steeply
+    angled wall before spatial grouping. None falls back to config.
 
     This is the full pipeline the project is building toward. It needs a real
     hold detector to be useful — with generic yolov8n it still runs, just on
@@ -295,6 +298,22 @@ def run_routes(image_path: str, config_path: str | None = None) -> str:
     # 2. Read each hold's real color (Lab) and 3. group into routes.
     print("[3/5] Reading hold colors and grouping into routes...")
     holds = rex.build_holds(image, hold_boxes)
+
+    # 2b. Optional perspective rectification for steeply angled photos: warp hold
+    #     positions into a frontal plane so spatial grouping is not foreshortened.
+    pcfg = config.get("perspective", {})
+    wall_corners = corners if corners is not None else (pcfg.get("corners") or None)
+    if wall_corners and (corners is not None or pcfg.get("enabled")):
+        import perspective
+        H, out_size = perspective.compute_homography(wall_corners)
+        perspective.rectify_holds(holds, H)
+        print(f"     perspective: rectified {len(holds)} holds to {out_size[0]}x{out_size[1]} frontal plane")
+        if pcfg.get("save_preview", True):
+            preview = perspective.warp_image(image, H, out_size)
+            ppath = utils.resolve_path(config["paths"]["routes_image"]).replace(".jpg", "_rectified.jpg")
+            utils.save_image(preview, ppath)
+            print(f"     perspective: wrote preview {ppath}")
+
     refs = utils.reference_labs(config["draw_colors"])
     rcfg = config["routes"]
     routes = rex.extract_routes(
@@ -349,10 +368,22 @@ def main() -> None:
         default=None,
         help="Optional path to a settings.yaml (defaults to config/settings.yaml).",
     )
+    parser.add_argument(
+        "--corners",
+        default=None,
+        help='Rectify a steeply angled wall before grouping. 4 wall corners as '
+             '"x,y x,y x,y x,y" (image pixels, any order). Implies --routes.',
+    )
     args = parser.parse_args()
 
-    if args.routes:
-        output_path = run_routes(args.image, args.config)
+    corners = None
+    if args.corners:
+        corners = [tuple(float(v) for v in pair.split(",")) for pair in args.corners.split()]
+        if len(corners) != 4:
+            parser.error("--corners needs exactly 4 'x,y' points")
+
+    if args.routes or corners:
+        output_path = run_routes(args.image, args.config, corners=corners)
     else:
         output_path = run(args.image, args.config)
     print("-" * 40)

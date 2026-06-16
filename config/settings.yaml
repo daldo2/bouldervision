@@ -55,6 +55,17 @@ routes:
   spatial_scale_eps: 8.0    # max gap between holds in units of hold size (adaptive mode)
 
 # ---------------------------------------------------------------------------
+# Perspective rectification — for photos taken at a steep angle to the wall.
+# Provide the wall's four corners (image pixels) and clustering runs in a
+# frontal, un-foreshortened plane. Override per photo with --corners on the CLI.
+# Leave enabled: false for near-frontal shots (the adaptive split handles those).
+# ---------------------------------------------------------------------------
+perspective:
+  enabled: false
+  corners: []               # 4 [x, y] wall corners, any order, e.g. [[100,200],[1400,150],[1500,1900],[80,1800]]
+  save_preview: true        # when on, also write a warped preview to data/output/ to check corners
+
+# ---------------------------------------------------------------------------
 # Color classification (HSV)
 # ---------------------------------------------------------------------------
 # OpenCV HSV ranges: H in [0,179], S in [0,255], V in [0,255].

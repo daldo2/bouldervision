@@ -48,23 +48,36 @@ class Hold:
     confidence: float
     lab: np.ndarray                     # dominant color, OpenCV 8-bit Lab
     name: str = ""                      # display color name (filled in later)
+    rect_box: Optional[Tuple[float, float, float, float]] = None  # box in rectified (frontal) coords
 
     @property
     def center(self) -> Tuple[float, float]:
-        """Centroid of the bounding box — used for spatial clustering."""
+        """Centroid of the bounding box (original image pixels)."""
         x1, y1, x2, y2 = self.box
         return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
     @property
+    def spatial_box(self) -> Tuple[float, float, float, float]:
+        """Box used for spatial reasoning — rectified if a homography was applied."""
+        return self.rect_box if self.rect_box is not None else self.box
+
+    @property
+    def spatial_center(self) -> Tuple[float, float]:
+        """Centroid used for spatial clustering (rectified frontal plane if set)."""
+        x1, y1, x2, y2 = self.spatial_box
+        return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+    @property
     def scale(self) -> float:
-        """Mean box side in pixels — a proxy for distance/foreshortening.
+        """Mean box side — a proxy for distance/foreshortening.
 
         On an angled photo a hold far down the wall projects smaller, so its
         scale is a local yardstick: measuring gaps between holds in units of
         scale (rather than raw pixels) keeps "same route" consistent whether
-        the holds are near the camera or foreshortened far away.
+        the holds are near the camera or foreshortened far away. Uses the
+        rectified box when a homography has un-warped the wall.
         """
-        x1, y1, x2, y2 = self.box
+        x1, y1, x2, y2 = self.spatial_box
         return max(1.0, ((x2 - x1) + (y2 - y1)) / 2.0)
 
 
@@ -126,7 +139,7 @@ def split_by_position(holds: List[Hold], eps_px: float, min_holds: int = 1) -> L
     if len(holds) == 1:
         return [holds] if min_holds <= 1 else []
 
-    centers = np.array([h.center for h in holds], dtype=np.float64)
+    centers = np.array([h.spatial_center for h in holds], dtype=np.float64)
     labels = DBSCAN(eps=eps_px, min_samples=min_holds, metric="euclidean").fit_predict(centers)
 
     clusters: Dict[int, List[Hold]] = {}
@@ -155,7 +168,7 @@ def split_by_position_adaptive(
     if len(holds) == 1:
         return [holds] if min_holds <= 1 else []
 
-    centers = np.array([h.center for h in holds], dtype=np.float64)
+    centers = np.array([h.spatial_center for h in holds], dtype=np.float64)
     scales = np.array([h.scale for h in holds], dtype=np.float64)
     diff = centers[:, None, :] - centers[None, :, :]
     dist = np.sqrt((diff ** 2).sum(axis=-1))

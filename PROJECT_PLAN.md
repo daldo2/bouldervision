@@ -138,11 +138,16 @@ pixel-space spatial clustering merges or over-splits routes.
   threshold is resolution- and distance-independent. `split_by_position_adaptive`
   in `route_extractor.py`. On a front-on wall this also fixed fragmentation
   (15 singleton "routes" → 4 coherent colour routes).
-- [ ] Medium term: rectify the wall plane via homography (detect/select 4 wall
-  corners → warp to a frontal view) before spatial clustering. Needed for
-  *extreme* angles (e.g. a whole wall shot down a corridor) where holds project
-  into one compact band and 2D clustering is inherently ambiguous.
-- [ ] Long term: prefer near-frontal shots in the capture guidance.
+- [x] Rectify the wall plane via homography: give 4 wall corners
+  (`--corners "x,y x,y x,y x,y"` or `perspective:` in config) and spatial
+  clustering runs in a frontal, un-foreshortened plane. `src/perspective.py`;
+  writes a `*_rectified.jpg` preview to verify the corners. Colour reading is
+  untouched (it already happened on the original crop).
+- [ ] Auto-detect the 4 corners (manual entry per photo is the current cost) —
+  e.g. fit the T-nut bolt-hole lattice, or detect the wall-edge quadrilateral.
+- [ ] NOTE: on very dim/distant wall sections the limiting factor is exposure +
+  detection density, not perspective — those need better capture, not warping.
+- [ ] Long term: prefer near-frontal, evenly-lit shots in the capture guidance.
 
 **Deliverable:** Route maps from real, imperfect gym photos with volumes,
 markers, tape and down-climb holds excluded from routes.

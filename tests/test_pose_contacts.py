@@ -98,3 +98,41 @@ def test_smooth_drops_flicker_runs():
     # A single-frame touch of hold 9 is dropped as flicker.
     seq = [None, None, 9, None, None]
     assert pe.smooth_contact_sequence(seq, max_gap=8, min_run=2) == [None, None, None, None, None]
+
+
+# --- sticky (stateful) contact resolution -----------------------------------
+def _foot(x, y, c=0.9):
+    return {"left_foot": (x, y, c), "left_hand": (0, 0, 0), "right_hand": (0, 0, 0),
+            "right_foot": (0, 0, 0)}
+
+
+def test_sticky_keeps_grip_through_fast_adjustment():
+    # Foot on hold 0; one frame it jumps 30px (fast) but stays near hold 0 -> stays.
+    box = [(200, 200, 260, 260)]
+    seq = [_foot(230, 230), _foot(231, 230), _foot(258, 235), _foot(232, 230)]
+    boxes = [box] * len(seq)
+    out = pe.resolve_contact_sequence(seq, boxes, touch_distance_px=30,
+                                      release_distance_px=70, max_speed_px=12, min_confidence=0.5)
+    assert [f["left_foot"] for f in out] == [0, 0, 0, 0]
+
+
+def test_sticky_releases_then_engages_new_hold_when_settled():
+    box0 = (100, 100, 140, 140)
+    box1 = (400, 100, 440, 140)
+    boxes = [[box0, box1]] * 5
+    # Start on hold 0, then a big leap far from both (releases), then settle on hold 1.
+    seq = [_foot(120, 120), _foot(120, 120), _foot(260, 110), _foot(420, 120), _foot(421, 120)]
+    out = pe.resolve_contact_sequence(seq, boxes, touch_distance_px=30,
+                                      release_distance_px=70, max_speed_px=12, min_confidence=0.5)
+    got = [f["left_foot"] for f in out]
+    assert got[0] == 0 and got[2] is None and got[-1] == 1
+
+
+def test_sticky_no_engage_while_reaching_fast_past_hold():
+    box = [(200, 200, 260, 260)]
+    # Not gripping; arrives near the hold but moving fast (reaching past) -> no grip.
+    seq = [_foot(120, 200), _foot(232, 230)]  # ~112px jump
+    boxes = [box] * len(seq)
+    out = pe.resolve_contact_sequence(seq, boxes, touch_distance_px=30,
+                                      release_distance_px=70, max_speed_px=12, min_confidence=0.5)
+    assert out[1]["left_foot"] is None

@@ -178,24 +178,21 @@ def analyze_video(
             if m["pose"] is not None:
                 m["pose"] = sp  # keep gaps (no pose) as gaps
 
-    # Resolve raw contacts (extremity points + velocity gate) over the sequence.
-    prev_points = None
-    points_per_frame: List[Optional[dict]] = []
-    raw_contacts: List[dict] = []
-    for m in per_frame:
-        if m["pose"] is None:
-            points_per_frame.append(None)
-            raw_contacts.append({limb: None for limb in pose_estimator.CONTACT_LIMBS})
-            prev_points = None
-            continue
-        pts = pose_estimator.limb_points(m["pose"], reach)
-        raw_contacts.append(pose_estimator.frame_contacts(
-            pts, prev_points, m["boxes"], pose_cfg["touch_distance_px"], max_speed, pose_cfg["confidence"],
-        ))
-        points_per_frame.append(pts)
-        prev_points = pts
+    # Extremity (hand/foot) points per frame.
+    points_per_frame: List[Optional[dict]] = [
+        pose_estimator.limb_points(m["pose"], reach) if m["pose"] is not None else None
+        for m in per_frame
+    ]
+    boxes_per_frame = [m["boxes"] for m in per_frame]
 
-    # Contact hysteresis per limb: bridge brief dropouts, drop flicker.
+    # Sticky, stateful contact resolution (engage when settled, stay while near).
+    raw_contacts = pose_estimator.resolve_contact_sequence(
+        points_per_frame, boxes_per_frame,
+        pose_cfg["touch_distance_px"], pose_cfg.get("release_distance_px", 70),
+        max_speed, pose_cfg["confidence"],
+    )
+
+    # Light hysteresis cleanup: bridge any residual dropouts, drop 1-frame flicker.
     gap = pose_cfg.get("contact_gap_frames", 8)
     min_run = pose_cfg.get("contact_min_run", 2)
     contacts_seq = [dict(c) for c in raw_contacts]

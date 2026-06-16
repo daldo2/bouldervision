@@ -207,6 +207,66 @@ def frame_contacts(
     return result
 
 
+def resolve_contact_sequence(
+    points_per_frame: List[Optional[Dict[str, Tuple[float, float, float]]]],
+    boxes_per_frame: List[List[Tuple[int, int, int, int]]],
+    touch_distance_px: float,
+    release_distance_px: float,
+    max_speed_px: float,
+    min_confidence: float,
+) -> List[Dict[str, Optional[int]]]:
+    """Stateful "sticky" contact resolution over a whole clip.
+
+    Models how a limb actually uses a hold:
+      - ENGAGE: a limb grabs the nearest hold only when it settles there — within
+        `touch_distance_px` AND moving slower than `max_speed_px` (so reaching
+        *past* a hold doesn't count).
+      - STAY (sticky): once gripping a hold it keeps gripping while it stays
+        within `release_distance_px` of THAT hold, regardless of speed — so a
+        foot adjusting on a hold (a brief fast wiggle) isn't dropped. It releases
+        only when it clearly leaves the hold's neighborhood.
+
+    This fixes the "leg disappears mid-split" case: a planted foot that briefly
+    speeds up to reposition stays gripped instead of flickering off. State is
+    kept across confidence dropouts / missing poses so short gaps don't release.
+
+    `points_per_frame[t]` is {limb: (x, y, conf)} or None (no climber that frame);
+    `boxes_per_frame[t]` are that frame's hold boxes (already stabilized if moving).
+    Returns a per-frame {limb: hold_index or None}.
+    """
+    state: Dict[str, Optional[int]] = {limb: None for limb in CONTACT_LIMBS}
+    prev: Optional[Dict[str, Tuple[float, float, float]]] = None
+    out: List[Dict[str, Optional[int]]] = []
+
+    for pts, boxes in zip(points_per_frame, boxes_per_frame):
+        frame: Dict[str, Optional[int]] = {limb: None for limb in CONTACT_LIMBS}
+        if pts is None:
+            out.append(frame)   # keep `state` so a brief gap doesn't release
+            prev = None
+            continue
+        for limb in CONTACT_LIMBS:
+            x, y, c = pts[limb]
+            cur = state[limb]
+            if c < min_confidence:
+                frame[limb] = cur  # can't see it this frame; assume unchanged
+                continue
+            if cur is not None and cur < len(boxes) and \
+                    point_to_box_distance(x, y, boxes[cur]) <= release_distance_px:
+                frame[limb] = cur  # sticky: still on the gripped hold
+                continue
+            idx = nearest_hold_index(x, y, boxes, touch_distance_px)
+            speed = math.hypot(x - prev[limb][0], y - prev[limb][1]) if prev and prev.get(limb) else 0.0
+            if idx is not None and speed <= max_speed_px:
+                state[limb] = idx
+                frame[limb] = idx
+            else:
+                state[limb] = None
+                frame[limb] = None
+        out.append(frame)
+        prev = pts
+    return out
+
+
 def smooth_contact_sequence(
     seq: List[Optional[int]], max_gap: int = 8, min_run: int = 2
 ) -> List[Optional[int]]:

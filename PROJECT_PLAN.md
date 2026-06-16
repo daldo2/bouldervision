@@ -123,7 +123,9 @@ one volume into several sub-boxes, the size test misses them; marker/tape
 heuristics are fragile per-gym; down-climb holds are **not** handled here.
 
 **Proper fix — retrain with a richer class set (depends on a labeled dataset):**
-- [ ] Annotate ~100–200 photos of **our** walls with classes:
+- Full step-by-step workflow: **`docs/annotation-retrain.md`**. Bootstrap with
+  `python scripts/export_for_annotation.py` (pre-labels into `data/annotation/`).
+- [ ] Annotate ~50–100 photos of **our** walls with classes:
   `hold`, `volume`, `downclimb`, `marker`, `tape`.
   (Bootstrap labels from `best.pt` predictions, then correct in Roboflow.)
 - [ ] Retrain YOLOv8 on Colab (same flow that produced `best.pt`).

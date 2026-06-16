@@ -207,6 +207,38 @@ def frame_contacts(
     return result
 
 
+def enforce_lr_consistency(poses: List[FramePose], min_conf: float = 0.3) -> List[FramePose]:
+    """Fix left/right limb-label swaps across a pose sequence.
+
+    yolov8-pose can flip which ankle/wrist is "left" vs "right" from frame to
+    frame (common in a wide split), which makes a planted foot's hold oscillate
+    and fabricates moves. Walking the sequence, we keep each limb pair assigned so
+    motion stays continuous: if swapping this frame's left/right tip brings both
+    closer to the previous frame's positions, we swap the whole limb (joint+tip).
+
+    Pure: returns new FramePoses, originals untouched. Low-confidence frames are
+    left as-is (no reliable basis to decide).
+    """
+    if len(poses) <= 1:
+        return list(poses)
+    seq = [p.keypoints.copy() for p in poses]
+    # ((left_base, left_tip), (right_base, right_tip)) for arms then legs
+    groups = [((7, 9), (8, 10)), ((13, 15), (14, 16))]
+    for t in range(1, len(seq)):
+        prev, cur = seq[t - 1], seq[t]
+        for (lb, lt), (rb, rt) in groups:
+            lx, ly, lc = cur[lt]; rx, ry, rc = cur[rt]
+            plx, ply, plc = prev[lt]; prx, pry, prc = prev[rt]
+            if min(lc, rc, plc, prc) < min_conf:
+                continue
+            same = math.hypot(lx - plx, ly - ply) + math.hypot(rx - prx, ry - pry)
+            swapped = math.hypot(lx - prx, ly - pry) + math.hypot(rx - plx, ry - ply)
+            if swapped < same:
+                cur[[lt, rt]] = cur[[rt, lt]]
+                cur[[lb, rb]] = cur[[rb, lb]]
+    return [FramePose(keypoints=k) for k in seq]
+
+
 def resolve_contact_sequence(
     points_per_frame: List[Optional[Dict[str, Tuple[float, float, float]]]],
     boxes_per_frame: List[List[Tuple[int, int, int, int]]],

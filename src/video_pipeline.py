@@ -244,6 +244,13 @@ def analyze_video(
     finally:
         cap.release()
 
+    # Fix left/right limb-label swaps before anything else uses the keypoints.
+    present = [m for m in per_frame if m["pose"] is not None]
+    if len(present) > 1:
+        fixed = pose_estimator.enforce_lr_consistency([m["pose"] for m in present])
+        for m, fp in zip(present, fixed):
+            m["pose"] = fp
+
     # Temporal keypoint smoothing (steadies jitter, e.g. during a wide split).
     window = pose_cfg.get("smooth_window", 1)
     if window and window > 1 and per_frame:
@@ -354,7 +361,7 @@ def main() -> None:
     cfg = utils.load_config(args.config) if args.config else utils.load_config()
     min_frames = max(1, round(cfg["pose"].get("primary_min_seconds", 1.0) * fps))
     print_summary(timeline, primary_min_frames=min_frames)
-    print_moves(extract_moves(timeline, fps, min_hold_frames=max(3, round(0.2 * fps))))
+    print_moves(extract_moves(timeline, fps, min_hold_frames=max(5, round(0.5 * fps))))
     if args.out:
         print(f"Annotated video: {args.out}")
 

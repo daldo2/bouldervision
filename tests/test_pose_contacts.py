@@ -128,6 +128,23 @@ def test_sticky_releases_then_engages_new_hold_when_settled():
     assert got[0] == 0 and got[2] is None and got[-1] == 1
 
 
+def test_lr_consistency_unswaps_flipped_labels():
+    # Left foot near x=100, right foot near x=300, steady across frames — but
+    # frame 1 has the labels swapped. Consistency should restore them.
+    def pose(lank, rank):
+        kp = np.zeros((17, 3), dtype=float)
+        kp[13] = (lank[0], lank[1] - 50, 0.9); kp[15] = (*lank, 0.9)  # left knee/ankle
+        kp[14] = (rank[0], rank[1] - 50, 0.9); kp[16] = (*rank, 0.9)  # right knee/ankle
+        return pe.FramePose(keypoints=kp)
+    seq = [pose((100, 400), (300, 400)),
+           pose((300, 400), (100, 400)),   # swapped!
+           pose((100, 400), (300, 400))]
+    fixed = pe.enforce_lr_consistency(seq)
+    # after fixing, the left ankle stays ~x=100 every frame
+    assert all(abs(p.keypoints[15][0] - 100) < 1 for p in fixed)
+    assert all(abs(p.keypoints[16][0] - 300) < 1 for p in fixed)
+
+
 def test_sticky_no_engage_while_reaching_fast_past_hold():
     box = [(200, 200, 260, 260)]
     # Not gripping; arrives near the hold but moving fast (reaching past) -> no grip.

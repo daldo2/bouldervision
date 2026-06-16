@@ -102,6 +102,47 @@ of holds.
 
 ---
 
+## Phase 2.5 — Wall furniture & real-photo robustness
+
+**Why:** On real gym photos the detector returns boxes for things that are NOT
+route holds, which pollute route grouping:
+
+| Thing | What it is | Signal |
+|-------|-----------|--------|
+| **Volumes** | big bolt-on shapes, neutral color, shared by routes | model class `1`; also large box area |
+| **Start/zone markers** | small solid-black circular stickers next to holds | small + square + dark + near-neutral |
+| **Difficulty tape** | thin strips marking a grade | extreme box aspect ratio |
+| **Down-climb holds** | descent holds, white/black, painted **down-arrow** | the arrow glyph; usually a vertical column at the wall edge |
+
+**Stopgap (implemented):** `src/detection_filter.py` sorts raw detections into
+`hold / volume / marker / tape` using the model's class id plus geometry/color
+heuristics; only holds feed route extraction. Tunable under `filter:` in
+`config/settings.yaml`. Set-aside items are drawn in neutral colors and counted
+in the summary so misclassifications are visible. **Limits:** when YOLO splits
+one volume into several sub-boxes, the size test misses them; marker/tape
+heuristics are fragile per-gym; down-climb holds are **not** handled here.
+
+**Proper fix — retrain with a richer class set (depends on a labeled dataset):**
+- [ ] Annotate ~100–200 photos of **our** walls with classes:
+  `hold`, `volume`, `downclimb`, `marker`, `tape`.
+  (Bootstrap labels from `best.pt` predictions, then correct in Roboflow.)
+- [ ] Retrain YOLOv8 on Colab (same flow that produced `best.pt`).
+- [ ] Drop classes other than `hold` from route grouping by *class*, not
+  heuristics; surface `volume`/`downclimb` as their own overlays.
+- [ ] Re-tune / retire the `filter:` heuristics once the model is reliable.
+
+**Perspective (angled photos):** holds far down an angled wall foreshorten, so
+pixel-space spatial clustering merges or over-splits routes.
+- [ ] Short term: per-image tuning of `routes.color_eps` / `spatial_eps_px`.
+- [ ] Medium term: rectify the wall plane via homography (detect/select 4 wall
+  corners → warp to a frontal view) before spatial clustering.
+- [ ] Long term: prefer near-frontal shots in the capture guidance.
+
+**Deliverable:** Route maps from real, imperfect gym photos with volumes,
+markers, tape and down-climb holds excluded from routes.
+
+---
+
 ## Phase 3 — Pose Estimation on Video
 
 **Goal:** Track the climber's body through a video and tie limbs to holds.

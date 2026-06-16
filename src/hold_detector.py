@@ -145,6 +145,30 @@ def detect_holds(
     return boxes
 
 
+def detect_objects(
+    model: YOLO,
+    image: np.ndarray,
+    confidence: float,
+    iou: float,
+    max_detections: int,
+) -> List[Tuple[int, int, int, int, float, int]]:
+    """Like detect_holds, but KEEPS the class id: (x1, y1, x2, y2, conf, cls).
+
+    The route pipeline needs the class to tell volumes (e.g. class 1 in best.pt)
+    from holds, then post-filters markers/tape by shape — see detection_filter.
+    Phase-1 `run()` still uses detect_holds and ignores class, as before.
+    """
+    print("[2/5] Running detection...")
+    results = model(image, conf=confidence, iou=iou, max_det=max_detections, verbose=False)
+    out: List[Tuple[int, int, int, int, float, int]] = []
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+        conf = float(box.conf[0].cpu().numpy())
+        cls = int(box.cls[0].cpu().numpy()) if box.cls is not None else -1
+        out.append((int(x1), int(y1), int(x2), int(y2), conf, cls))
+    return out
+
+
 def classify_and_annotate(
     image: np.ndarray,
     boxes: List[Tuple[int, int, int, int, float]],
@@ -252,18 +276,25 @@ def run_routes(image_path: str, config_path: str | None = None) -> str:
     whatever boxes COCO produces.
     """
     import route_extractor as rex  # imported here; pulls sklearn, not torch
+    import detection_filter as dfilt
 
     config = utils.load_config(config_path) if config_path else utils.load_config()
     image = utils.read_image(image_path)
 
-    # 1. Detect candidate holds (boxes only — color comes next).
+    # 1. Detect candidate features (keep the class id for the volume split).
     model = load_detector(config["models"]["hold_detector"])
     det = config["detection"]
-    boxes = detect_holds(model, image, det["confidence"], det["iou"], det["max_detections"])
+    raw = detect_objects(model, image, det["confidence"], det["iou"], det["max_detections"])
+
+    # 1b. Sort detections: only true holds become routes; volumes, start/zone
+    #     markers and difficulty tape are set aside (and reported below).
+    dets = dfilt.classify_detections(raw, image, config["filter"])
+    hold_boxes = dfilt.holds_only(dets)
+    aside = {k: len(dfilt.of_kind(dets, k)) for k in (dfilt.VOLUME, dfilt.MARKER, dfilt.TAPE)}
 
     # 2. Read each hold's real color (Lab) and 3. group into routes.
     print("[3/5] Reading hold colors and grouping into routes...")
-    holds = rex.build_holds(image, boxes)
+    holds = rex.build_holds(image, hold_boxes)
     refs = utils.reference_labs(config["draw_colors"])
     rcfg = config["routes"]
     routes = rex.extract_routes(
@@ -274,8 +305,13 @@ def run_routes(image_path: str, config_path: str | None = None) -> str:
         references=refs,
     )
 
-    # 4. Draw and save the route map.
+    # 4. Draw and save the route map. Overlay set-aside detections in distinct
+    #    neutral colors so their classification can be eyeballed for mistakes.
     annotated = utils.draw_routes(image, routes)
+    aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200), dfilt.TAPE: (200, 200, 0)}
+    for d in dets:
+        if d.kind in aside_style:
+            utils.draw_box(annotated, d.box, d.kind, aside_style[d.kind])
     output_path = utils.resolve_path(config["paths"]["routes_image"])
     print(f"[4/5] Saving route map to: {output_path}")
     utils.save_image(annotated, output_path)
@@ -289,6 +325,9 @@ def run_routes(image_path: str, config_path: str | None = None) -> str:
         print(f"Found {len(routes)} route(s) from {len(holds)} holds:")
         for i, r in enumerate(routes, start=1):
             print(f"  #{i}  {r.color_name or '?':<8} {r.hold_count} holds")
+    set_aside = ", ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in aside.items() if n)
+    if set_aside:
+        print(f"Set aside (not routes): {set_aside}")
     return output_path
 
 

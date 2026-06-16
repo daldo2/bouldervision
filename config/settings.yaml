@@ -28,6 +28,21 @@ pose:
   touch_distance_px: 40     # hand/foot within this many px of a hold = "touching"
 
 # ---------------------------------------------------------------------------
+# Detection post-processing — sort raw detections into holds vs. wall furniture
+# that should NOT become routes (volumes, start/zone markers, difficulty tape).
+# This is a heuristic stopgap; the clean fix is a model retrained with these as
+# their own classes (see PROJECT_PLAN.md). Tune per gym.
+# ---------------------------------------------------------------------------
+filter:
+  volume_class: 1           # class id the detector uses for volumes (best.pt: 0=hold, 1=volume)
+  volume_area_frac: 0.04    # boxes larger than this fraction of the image are treated as volumes
+  tape_aspect: 3.5          # length/width >= this => difficulty tape strip, not a hold
+  marker_max_area_frac: 0.0010   # markers are small: box area below this fraction of the image
+  marker_max_aspect: 1.4    # ...and roughly square (a circle's box)
+  marker_dark_l_max: 90     # ...and very dark (OpenCV Lab L, 0-255)
+  marker_chroma_max: 18     # ...and near-neutral (low chroma) — i.e. a black dot
+
+# ---------------------------------------------------------------------------
 # Route extraction (Phase 2) — holds are grouped into routes by clustering their
 # real colors per image, then split spatially. See src/route_extractor.py.
 # ---------------------------------------------------------------------------

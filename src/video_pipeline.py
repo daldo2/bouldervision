@@ -67,6 +67,80 @@ def holds_used(timeline: List["FrameAnalysis"], min_frames: int = 1) -> set:
     return {idx for idx, n in counts.items() if n >= min_frames}
 
 
+@dataclass
+class Move:
+    """One climbing move: a limb arriving on a (new) hold."""
+    order: int          # 1-based move number in the climb
+    frame_index: int
+    time_s: float
+    limb: str           # left_hand / right_hand / left_foot / right_foot
+    hold: int           # hold index the limb moved ONTO
+    start: bool = False # part of the initial established position
+
+
+def extract_moves(timeline: List["FrameAnalysis"], fps: float = 30.0,
+                  min_hold_frames: int = 5) -> List["Move"]:
+    """Turn a per-frame contact timeline into an ordered move sequence ("beta").
+
+    A move is recorded when a limb settles on a hold *different* from the one it
+    last held — i.e. it grabbed something new. A limb releasing (going to None)
+    does NOT reset its memory, so letting go and re-gripping the SAME hold is not
+    counted as a move. To avoid logging a hold the climber only brushed, a new
+    hold must be held for at least `min_hold_frames` frames to count.
+
+    The first time each limb settles is flagged `start` (the starting position).
+    Returns moves ordered by time.
+    """
+    # How long each (limb, hold) contact run lasts, so we can ignore brief ones.
+    moves: List[Move] = []
+    last_hold = {limb: None for limb in ("left_hand", "right_hand", "left_foot", "right_foot")}
+    started = set()
+    n = len(timeline)
+
+    def run_length(t: int, limb: str, hold: int) -> int:
+        length = 0
+        while t + length < n and timeline[t + length].contacts.get(limb) == hold:
+            length += 1
+        return length
+
+    order = 0
+    for t, frame in enumerate(timeline):
+        for limb in last_hold:
+            hold = frame.contacts.get(limb)
+            if hold is None or hold == last_hold[limb]:
+                continue
+            if run_length(t, limb, hold) < min_hold_frames:
+                continue  # too brief — a brush, not a move
+            order += 1
+            is_start = limb not in started
+            started.add(limb)
+            moves.append(Move(order=order, frame_index=frame.frame_index,
+                              time_s=frame.frame_index / fps, limb=limb,
+                              hold=hold, start=is_start))
+            last_hold[limb] = hold
+    return moves
+
+
+_LIMB_SHORT = {"left_hand": "LH", "right_hand": "RH", "left_foot": "LF", "right_foot": "RF"}
+
+
+def print_moves(moves: List["Move"]) -> None:
+    """Print the move sequence (beta) in a readable form."""
+    print("-" * 40)
+    if not moves:
+        print("No moves detected.")
+        return
+    starts = [m for m in moves if m.start]
+    seq = [m for m in moves if not m.start]
+    print("Move sequence (beta):")
+    if starts:
+        pos = "  ".join(f"{_LIMB_SHORT[m.limb]}->#{m.hold}" for m in starts)
+        print(f"  start ({starts[-1].time_s:4.1f}s):  {pos}")
+    for i, m in enumerate(seq, start=1):
+        print(f"  {i:2d}. {m.time_s:5.1f}s  {_LIMB_SHORT[m.limb]} -> #{m.hold}")
+    print(f"  ({len(seq)} moves after establishing)")
+
+
 def analyze_video(
     video_path: str,
     output_path: Optional[str] = None,
@@ -280,6 +354,7 @@ def main() -> None:
     cfg = utils.load_config(args.config) if args.config else utils.load_config()
     min_frames = max(1, round(cfg["pose"].get("primary_min_seconds", 1.0) * fps))
     print_summary(timeline, primary_min_frames=min_frames)
+    print_moves(extract_moves(timeline, fps, min_hold_frames=max(3, round(0.2 * fps))))
     if args.out:
         print(f"Annotated video: {args.out}")
 

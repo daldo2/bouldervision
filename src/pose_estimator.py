@@ -207,6 +207,54 @@ def frame_contacts(
     return result
 
 
+def smooth_contact_sequence(
+    seq: List[Optional[int]], max_gap: int = 8, min_run: int = 2
+) -> List[Optional[int]]:
+    """Clean one limb's frame-by-frame hold sequence (hysteresis).
+
+    Two passes that make contacts match reality during dynamic moves:
+      1. Bridge short dropouts: a None gap of <= `max_gap` frames flanked by the
+         *same* hold on both sides is filled — the climber didn't actually let go
+         for a few frames (a speed blip or a momentary low-confidence joint).
+      2. Drop flicker: a contact run shorter than `min_run` frames is removed —
+         a one- or two-frame touch is almost always a 2D near-pass, not a grip.
+
+    Returns a new list the same length as `seq`.
+    """
+    out = list(seq)
+    n = len(out)
+
+    i = 0
+    while i < n:                       # 1. gap fill
+        if out[i] is None:
+            j = i
+            while j < n and out[j] is None:
+                j += 1
+            left = out[i - 1] if i - 1 >= 0 else None
+            right = out[j] if j < n else None
+            if left is not None and left == right and (j - i) <= max_gap:
+                for k in range(i, j):
+                    out[k] = left
+            i = j
+        else:
+            i += 1
+
+    i = 0
+    while i < n:                       # 2. drop short runs
+        if out[i] is not None:
+            j = i
+            while j < n and out[j] == out[i]:
+                j += 1
+            if (j - i) < min_run:
+                for k in range(i, j):
+                    out[k] = None
+            i = j
+        else:
+            i += 1
+
+    return out
+
+
 def smooth_keypoint_sequence(poses: List[FramePose], window: int = 5) -> List[FramePose]:
     """Smooth jittery keypoints across time with a confidence-weighted moving
     average (centered window). Reduces frame-to-frame noise so contact decisions

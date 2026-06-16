@@ -29,6 +29,9 @@ pose:
   reach_frac: 0.33          # extrapolate past wrist/ankle toward the hand/foot by this fraction
   contact_max_speed_px: 12  # a limb moving faster than this (px/frame) is reaching, not gripping
   primary_min_seconds: 1.0  # a hold held >= this long counts as a real "route hold" in the summary
+  smooth_window: 5          # temporal keypoint smoothing window (odd; 1 = off) — steadies jitter
+  contact_gap_frames: 8     # bridge contact dropouts up to this many frames (a brief blip, not a release)
+  contact_min_run: 2        # drop contacts shorter than this many frames (flicker / near-pass)
 
 # ---------------------------------------------------------------------------
 # Detection post-processing — sort raw detections into holds vs. wall furniture

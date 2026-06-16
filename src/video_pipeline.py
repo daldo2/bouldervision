@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 import cv2
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import utils  # noqa: E402
@@ -106,13 +107,6 @@ def analyze_video(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    writer = None
-    if output_path:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-    timeline: List[FrameAnalysis] = []
-
     # Load both models once, lazily (torch is heavy and only needed here).
     import hold_detector
     import pose_estimator
@@ -121,6 +115,8 @@ def analyze_video(
     pose_model = pose_estimator.load_pose_model(config["models"]["pose_estimator"])
     det = config["detection"]
     pose_cfg = config["pose"]
+    reach = pose_cfg.get("reach_frac", 0.33)
+    max_speed = pose_cfg.get("contact_max_speed_px", 12)
 
     def detect_at(frame) -> List[tuple]:
         boxes = hold_detector.detect_holds(
@@ -143,51 +139,91 @@ def analyze_video(
                 import stabilize as stab  # lazy: only needed for handheld clips
                 stabilizer = stab.CameraStabilizer(dframe)
 
+    # PASS 1 — collect per-frame holds + pose (no contacts yet; they need the
+    # whole sequence for temporal smoothing).
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     frame_index = start_frame
     processed = 0
-    reach = pose_cfg.get("reach_frac", 0.33)
-    max_speed = pose_cfg.get("contact_max_speed_px", 12)
-    prev_points = None  # extremity points from the previous frame, for velocity gating
-
+    per_frame: List[dict] = []  # {index, boxes, pose|None}
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
-                break  # end of video
-
-            # Moving-camera mode: periodically re-detect (indices not stable).
+                break
             if detect_every > 0 and frame_index % detect_every == 0:
                 hold_boxes = detect_at(frame)
-            # Handheld: warp the static reference boxes to follow the camera.
             elif stabilizer is not None:
                 hold_boxes = stabilizer.warp_boxes(ref_boxes, frame)
-
-            # Estimate the climber's pose, then resolve gripping contacts using
-            # extremity points + a velocity gate (anchored limb = gripping).
             poses = pose_estimator.estimate_pose(pose_model, frame, pose_cfg["confidence"])
-            contacts = {limb: None for limb in pose_estimator.CONTACT_LIMBS}
-            points = None
-            if poses:
-                points = pose_estimator.limb_points(poses[0], reach)
-                contacts = pose_estimator.frame_contacts(
-                    points, prev_points, hold_boxes,
-                    pose_cfg["touch_distance_px"], max_speed, pose_cfg["confidence"],
-                )
-            prev_points = points  # None on missing pose -> next frame won't gate on a stale point
-
-            if writer is not None:
-                _draw_frame(frame, hold_boxes, poses, contacts, points)
-                writer.write(frame)
-
-            timeline.append(FrameAnalysis(frame_index=frame_index, contacts=contacts))
+            per_frame.append({
+                "index": frame_index,
+                "boxes": list(hold_boxes),
+                "pose": poses[0] if poses else None,
+            })
             frame_index += 1
             processed += 1
             if max_frames is not None and processed >= max_frames:
                 break
     finally:
         cap.release()
-        if writer is not None:
+
+    # Temporal keypoint smoothing (steadies jitter, e.g. during a wide split).
+    window = pose_cfg.get("smooth_window", 1)
+    if window and window > 1 and per_frame:
+        blank = np.zeros((17, 3), dtype=float)
+        stacked = [pose_estimator.FramePose(m["pose"].keypoints if m["pose"] is not None else blank)
+                   for m in per_frame]
+        smoothed = pose_estimator.smooth_keypoint_sequence(stacked, window)
+        for m, sp in zip(per_frame, smoothed):
+            if m["pose"] is not None:
+                m["pose"] = sp  # keep gaps (no pose) as gaps
+
+    # Resolve raw contacts (extremity points + velocity gate) over the sequence.
+    prev_points = None
+    points_per_frame: List[Optional[dict]] = []
+    raw_contacts: List[dict] = []
+    for m in per_frame:
+        if m["pose"] is None:
+            points_per_frame.append(None)
+            raw_contacts.append({limb: None for limb in pose_estimator.CONTACT_LIMBS})
+            prev_points = None
+            continue
+        pts = pose_estimator.limb_points(m["pose"], reach)
+        raw_contacts.append(pose_estimator.frame_contacts(
+            pts, prev_points, m["boxes"], pose_cfg["touch_distance_px"], max_speed, pose_cfg["confidence"],
+        ))
+        points_per_frame.append(pts)
+        prev_points = pts
+
+    # Contact hysteresis per limb: bridge brief dropouts, drop flicker.
+    gap = pose_cfg.get("contact_gap_frames", 8)
+    min_run = pose_cfg.get("contact_min_run", 2)
+    contacts_seq = [dict(c) for c in raw_contacts]
+    for limb in pose_estimator.CONTACT_LIMBS:
+        cleaned = pose_estimator.smooth_contact_sequence(
+            [c[limb] for c in raw_contacts], gap, min_run)
+        for t, v in enumerate(cleaned):
+            contacts_seq[t][limb] = v
+
+    timeline = [FrameAnalysis(frame_index=m["index"], contacts=contacts_seq[t])
+                for t, m in enumerate(per_frame)]
+
+    # PASS 2 — draw the annotated video using the smoothed contacts.
+    if output_path:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        try:
+            for t, m in enumerate(per_frame):
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                poses = [m["pose"]] if m["pose"] is not None else []
+                _draw_frame(frame, m["boxes"], poses, contacts_seq[t], points_per_frame[t])
+                writer.write(frame)
+        finally:
+            cap.release()
             writer.release()
 
     return timeline

@@ -74,3 +74,27 @@ def test_first_frame_not_gated_on_missing_prev():
     pts = {"left_hand": (220, 220, 0.9)}
     out = pe.frame_contacts(pts, None, HOLDS, touch_distance_px=40, max_speed_px=12, min_confidence=0.5)
     assert out["left_hand"] == 0
+
+
+# --- contact hysteresis -----------------------------------------------------
+def test_smooth_bridges_short_dropout():
+    # On hold 3, a 2-frame blip to None, back on 3 -> the gap is filled.
+    seq = [3, 3, None, None, 3, 3]
+    assert pe.smooth_contact_sequence(seq, max_gap=8, min_run=2) == [3, 3, 3, 3, 3, 3]
+
+
+def test_smooth_does_not_bridge_different_holds():
+    # 3 then None then 5 -> a real move between holds, not a dropout.
+    seq = [3, 3, None, 5, 5]
+    assert pe.smooth_contact_sequence(seq, max_gap=8, min_run=1) == [3, 3, None, 5, 5]
+
+
+def test_smooth_does_not_bridge_too_long_a_gap():
+    seq = [3, None, None, None, 3]
+    assert pe.smooth_contact_sequence(seq, max_gap=2, min_run=1) == [3, None, None, None, 3]
+
+
+def test_smooth_drops_flicker_runs():
+    # A single-frame touch of hold 9 is dropped as flicker.
+    seq = [None, None, 9, None, None]
+    assert pe.smooth_contact_sequence(seq, max_gap=8, min_run=2) == [None, None, None, None, None]

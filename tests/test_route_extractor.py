@@ -75,6 +75,38 @@ def test_split_by_position_drops_outlier_when_min_holds_raised():
     assert len(clusters[0]) == 2  # the lone far hold is dropped as noise
 
 
+# --- perspective-aware (adaptive) spatial split ----------------------------
+def sized_hold(bgr, center, size):
+    """A Hold whose box is `size` px across (controls its `scale`)."""
+    cx, cy = center
+    r = size // 2
+    return re.Hold(box=(cx - r, cy - r, cx + r, cy + r), lab=lab_of(bgr), confidence=0.9)
+
+
+def test_adaptive_split_groups_foreshortened_route():
+    # One route seen at an angle: holds shrink (80 -> 18) and pack together
+    # (140px -> 48px gaps) as the wall recedes, but every consecutive gap stays
+    # ~2 hold-widths, so it is ONE route. A single pixel eps can't fit both ends.
+    chain = [
+        sized_hold(RED, (300, 700), 80),
+        sized_hold(RED, (300, 560), 60),
+        sized_hold(RED, (300, 450), 44),
+        sized_hold(RED, (300, 365), 32),
+        sized_hold(RED, (300, 300), 24),
+        sized_hold(RED, (300, 252), 18),
+    ]
+    clusters = re.split_by_position_adaptive(chain, scale_eps=6.0)
+    assert len(clusters) == 1
+
+
+def test_adaptive_split_separates_distinct_routes():
+    # Two small far routes, genuinely far apart relative to their size.
+    left = [sized_hold(RED, (200, 300), 16), sized_hold(RED, (224, 296), 16)]
+    right = [sized_hold(RED, (900, 300), 16), sized_hold(RED, (924, 296), 16)]
+    clusters = re.split_by_position_adaptive(left + right, scale_eps=6.0)
+    assert len(clusters) == 2
+
+
 # --- end to end ------------------------------------------------------------
 def test_extract_routes_two_red_one_blue():
     # Two separate red problems + one blue problem.

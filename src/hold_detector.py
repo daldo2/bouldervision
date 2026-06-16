@@ -303,6 +303,8 @@ def run_routes(image_path: str, config_path: str | None = None) -> str:
         spatial_eps_px=rcfg["spatial_eps_px"],
         spatial_min_holds=rcfg["spatial_min_holds"],
         references=refs,
+        adaptive_spatial=rcfg.get("adaptive_spatial", False),
+        spatial_scale_eps=rcfg.get("spatial_scale_eps", 8.0),
     )
 
     # 4. Draw and save the route map. Overlay set-aside detections in distinct

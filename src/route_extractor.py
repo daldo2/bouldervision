@@ -55,6 +55,18 @@ class Hold:
         x1, y1, x2, y2 = self.box
         return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
+    @property
+    def scale(self) -> float:
+        """Mean box side in pixels — a proxy for distance/foreshortening.
+
+        On an angled photo a hold far down the wall projects smaller, so its
+        scale is a local yardstick: measuring gaps between holds in units of
+        scale (rather than raw pixels) keeps "same route" consistent whether
+        the holds are near the camera or foreshortened far away.
+        """
+        x1, y1, x2, y2 = self.box
+        return max(1.0, ((x2 - x1) + (y2 - y1)) / 2.0)
+
 
 @dataclass
 class Route:
@@ -125,6 +137,41 @@ def split_by_position(holds: List[Hold], eps_px: float, min_holds: int = 1) -> L
     return [c for _, c in sorted(clusters.items())]
 
 
+def split_by_position_adaptive(
+    holds: List[Hold], scale_eps: float, min_holds: int = 1
+) -> List[List[Hold]]:
+    """Like split_by_position, but perspective-aware for angled photos.
+
+    Instead of a fixed pixel radius, two holds count as the same route when the
+    gap between them is within `scale_eps` *hold-widths* — using the average of
+    their `scale`s as the local yardstick. As the wall foreshortens, both gaps
+    and hold sizes shrink together, so this ratio stays stable across the image
+    where a single pixel `eps` would over-merge far holds and split near ones.
+
+    Implemented as DBSCAN on a precomputed, scale-normalized distance matrix.
+    """
+    if not holds:
+        return []
+    if len(holds) == 1:
+        return [holds] if min_holds <= 1 else []
+
+    centers = np.array([h.center for h in holds], dtype=np.float64)
+    scales = np.array([h.scale for h in holds], dtype=np.float64)
+    diff = centers[:, None, :] - centers[None, :, :]
+    dist = np.sqrt((diff ** 2).sum(axis=-1))
+    avg_scale = (scales[:, None] + scales[None, :]) / 2.0
+    normalized = dist / avg_scale
+
+    labels = DBSCAN(eps=scale_eps, min_samples=min_holds, metric="precomputed").fit_predict(normalized)
+
+    clusters: Dict[int, List[Hold]] = {}
+    for hold, label in zip(holds, labels):
+        if label == -1:
+            continue
+        clusters.setdefault(int(label), []).append(hold)
+    return [c for _, c in sorted(clusters.items())]
+
+
 # ---------------------------------------------------------------------------
 # Bridge from detector output to Holds
 # ---------------------------------------------------------------------------
@@ -160,6 +207,8 @@ def extract_routes(
     spatial_eps_px: float = 250.0,
     spatial_min_holds: int = 1,
     references: Optional[Dict[str, np.ndarray]] = None,
+    adaptive_spatial: bool = False,
+    spatial_scale_eps: float = 8.0,
 ) -> List[Route]:
     """Turn a flat list of holds into named routes.
 
@@ -167,12 +216,21 @@ def extract_routes(
     resulting route by its nearest reference color (if `references` given —
     build them with utils.reference_labs(config["draw_colors"])).
 
+    `adaptive_spatial` switches the spatial step to a perspective-aware,
+    hold-size-relative split (`spatial_scale_eps` in hold-widths) — better for
+    angled photos; the fixed-pixel `spatial_eps_px` is used otherwise.
+
     Returns routes sorted by hold count (largest first) for stable output.
     """
+    def split(group: List[Hold]) -> List[List[Hold]]:
+        if adaptive_spatial:
+            return split_by_position_adaptive(group, spatial_scale_eps, spatial_min_holds)
+        return split_by_position(group, spatial_eps_px, spatial_min_holds)
+
     routes: List[Route] = []
 
     for color_group in cluster_by_color(holds, eps=color_eps):
-        for route_holds in split_by_position(color_group, spatial_eps_px, spatial_min_holds):
+        for route_holds in split(color_group):
             rep_lab = np.median([h.lab for h in route_holds], axis=0).astype(np.float64)
             name = utils.nearest_color_name(rep_lab, references) if references else ""
             for h in route_holds:

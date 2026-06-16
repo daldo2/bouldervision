@@ -36,7 +36,8 @@ pose:
 filter:
   volume_class: 1           # class id the detector uses for volumes (best.pt: 0=hold, 1=volume)
   volume_area_frac: 0.04    # boxes larger than this fraction of the image are treated as volumes
-  tape_aspect: 3.5          # length/width >= this => difficulty tape strip, not a hold
+  tape_aspect: 3.5          # length/width >= this => candidate difficulty tape strip
+  tape_max_thickness_px: 60 # ...and the short side must be this thin (else it's a big cut-off shape)
   marker_max_area_frac: 0.0010   # markers are small: box area below this fraction of the image
   marker_max_aspect: 1.4    # ...and roughly square (a circle's box)
   marker_dark_l_max: 90     # ...and very dark (OpenCV Lab L, 0-255)
@@ -48,8 +49,10 @@ filter:
 # ---------------------------------------------------------------------------
 routes:
   color_eps: 28             # max Lab distance for two holds to share a color (smaller = stricter)
-  spatial_eps_px: 250       # max pixel distance for holds to be the same route
+  spatial_eps_px: 250       # max pixel distance for holds to be the same route (non-adaptive mode)
   spatial_min_holds: 1      # raise to drop isolated holds as noise (route needs >= this many nearby)
+  adaptive_spatial: true    # measure spacing in hold-widths, not pixels — robust to angled photos
+  spatial_scale_eps: 8.0    # max gap between holds in units of hold size (adaptive mode)
 
 # ---------------------------------------------------------------------------
 # Color classification (HSV)

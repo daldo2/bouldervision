@@ -133,9 +133,15 @@ heuristics are fragile per-gym; down-climb holds are **not** handled here.
 
 **Perspective (angled photos):** holds far down an angled wall foreshorten, so
 pixel-space spatial clustering merges or over-splits routes.
-- [ ] Short term: per-image tuning of `routes.color_eps` / `spatial_eps_px`.
+- [x] Scale-adaptive spatial split: measure hold spacing in *hold-widths*
+  (`routes.adaptive_spatial` + `spatial_scale_eps`), not raw pixels, so the
+  threshold is resolution- and distance-independent. `split_by_position_adaptive`
+  in `route_extractor.py`. On a front-on wall this also fixed fragmentation
+  (15 singleton "routes" → 4 coherent colour routes).
 - [ ] Medium term: rectify the wall plane via homography (detect/select 4 wall
-  corners → warp to a frontal view) before spatial clustering.
+  corners → warp to a frontal view) before spatial clustering. Needed for
+  *extreme* angles (e.g. a whole wall shot down a corridor) where holds project
+  into one compact band and 2D clustering is inherently ambiguous.
 - [ ] Long term: prefer near-frontal shots in the capture guidance.
 
 **Deliverable:** Route maps from real, imperfect gym photos with volumes,

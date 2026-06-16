@@ -22,9 +22,16 @@ FCFG = utils.load_config()["filter"]
 
 
 def test_tape_detected_by_aspect_ratio():
-    # 200x20 strip on a 1000x1000 image -> aspect 10, well over the threshold.
+    # 200x20 strip on a 1000x1000 image -> aspect 10, thin -> tape.
     img = np.full((1000, 1000, 3), 180, dtype=np.uint8)
     assert df.classify_detection((100, 100, 300, 120), 0, img, FCFG) == df.TAPE
+
+
+def test_elongated_but_thick_shape_is_not_tape():
+    # A tall, partly cut-off shape (158x653): elongated aspect but far too thick
+    # to be tape. Big enough to read as a volume instead, but never tape.
+    img = np.full((1500, 1500, 3), 180, dtype=np.uint8)
+    assert df.classify_detection((0, 74, 158, 727), 0, img, FCFG) != df.TAPE
 
 
 def test_volume_detected_by_class():

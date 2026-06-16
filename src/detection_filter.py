@@ -73,8 +73,10 @@ def classify_detection(
     long_side, short_side = max(w, h), max(1, min(w, h))
     aspect = long_side / short_side
 
-    # 1. Difficulty tape: a long, thin strip — nothing else is this elongated.
-    if aspect >= fcfg["tape_aspect"]:
+    # 1. Difficulty tape: a long AND genuinely thin strip. The thinness guard
+    #    stops a big cut-off shape at the image edge (elongated but not thin)
+    #    from being mistaken for tape.
+    if aspect >= fcfg["tape_aspect"] and short_side <= fcfg["tape_max_thickness_px"]:
         return TAPE
 
     # 2. Volume: the model's own class, or simply too big to be a hold.

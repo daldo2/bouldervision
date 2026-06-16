@@ -107,12 +107,20 @@ of holds.
 **Goal:** Track the climber's body through a video and tie limbs to holds.
 
 **Tasks**
-- Run `yolov8x-pose` per frame to extract 17 COCO keypoints.
-- Smooth keypoints across frames (e.g. simple moving average / One-Euro filter)
-  to reduce jitter.
-- For each frame, decide which holds the hands and feet are touching
-  (keypoint-to-hold-box proximity).
-- Persist a per-frame timeline: `frame → {limb → hold_id | None}`.
+- [x] Per-frame keypoint extraction wired (`pose_estimator.estimate_pose`,
+  lazy model load).
+- [x] Smooth keypoints across frames — confidence-weighted moving average
+  (`smooth_keypoint_sequence`).
+- [x] Decide which holds hands/feet touch (keypoint-to-box edge proximity,
+  `touched_holds`) + unit tests.
+- [x] Per-frame timeline + aggregation (`video_pipeline.analyze_video`,
+  `summarize_contacts`, `holds_used`).
+- [ ] Validate + tune `touch_distance_px` on real footage (pending videos).
+- [ ] Polish the annotated-video overlay (skeleton bones, hold labels).
+
+**Status:** All model-free logic is implemented and tested offline. The video
+loop and pose model run as soon as real footage + a pose model are available
+(yolov8x-pose auto-downloads).
 
 **Deliverable:** An annotated video with the skeleton overlaid and the
 currently-touched holds highlighted.

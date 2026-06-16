@@ -21,6 +21,7 @@ implemented; per-frame video iteration and hold-contact logic are TODOs.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -81,6 +82,19 @@ def estimate_pose(model, image: np.ndarray, confidence: float) -> List[FramePose
     return poses
 
 
+def point_to_box_distance(x: float, y: float, box: Tuple[int, int, int, int]) -> float:
+    """Shortest distance from point (x, y) to a box's rectangle.
+
+    0 if the point is inside the box; otherwise the distance to the nearest
+    edge/corner. We use edge distance (not center distance) so a big volume and a
+    tiny crimp are judged fairly — a hand resting anywhere on a large hold counts.
+    """
+    x1, y1, x2, y2 = box
+    dx = max(x1 - x, 0.0, x - x2)
+    dy = max(y1 - y, 0.0, y - y2)
+    return math.hypot(dx, dy)
+
+
 def touched_holds(
     pose: FramePose,
     hold_boxes: List[Tuple[int, int, int, int]],
@@ -89,12 +103,51 @@ def touched_holds(
 ) -> Dict[str, Optional[int]]:
     """Map each contact limb to the index of the hold it's touching (or None).
 
-    INTENDED APPROACH (Phase 3 TODO):
-      - For each limb keypoint above `min_confidence`, find the nearest hold box
-        (e.g. distance from keypoint to box center or box edge).
-      - If that distance is under `touch_distance_px`, record contact.
+    For each limb keypoint confident enough (`min_confidence`), we find the
+    nearest hold by edge distance; if that distance is within `touch_distance_px`
+    the limb is considered to be touching that hold.
 
     Returned dict: {"left_hand": hold_index_or_None, ...}.
     """
-    # TODO(phase-3): implement nearest-hold proximity matching.
-    return {limb: None for limb in CONTACT_LIMBS}
+    result: Dict[str, Optional[int]] = {}
+    for limb, idx in CONTACT_LIMBS.items():
+        x, y, conf = pose.keypoints[idx]
+        if conf < min_confidence:
+            result[limb] = None  # joint not reliably seen this frame
+            continue
+
+        nearest_idx, nearest_dist = None, float("inf")
+        for i, box in enumerate(hold_boxes):
+            dist = point_to_box_distance(float(x), float(y), box)
+            if dist < nearest_dist:
+                nearest_dist, nearest_idx = dist, i
+
+        result[limb] = nearest_idx if nearest_dist <= touch_distance_px else None
+    return result
+
+
+def smooth_keypoint_sequence(poses: List[FramePose], window: int = 5) -> List[FramePose]:
+    """Smooth jittery keypoints across time with a confidence-weighted moving
+    average (centered window). Reduces frame-to-frame noise so contact decisions
+    don't flicker. `window` should be odd; 1 returns the input unchanged.
+
+    Each output position is the average of the surrounding `window` frames,
+    weighting each by its keypoint confidence so unreliable joints contribute
+    little. Confidence itself is averaged (unweighted).
+    """
+    if window <= 1 or len(poses) <= 1:
+        return list(poses)
+
+    data = np.stack([p.keypoints for p in poses]).astype(np.float64)  # (T, 17, 3)
+    n_frames = data.shape[0]
+    half = window // 2
+    out = data.copy()
+
+    for t in range(n_frames):
+        lo, hi = max(0, t - half), min(n_frames, t + half + 1)
+        seg = data[lo:hi]                       # (w, 17, 3)
+        weights = np.clip(seg[:, :, 2:3], 1e-6, None)  # (w, 17, 1)
+        out[t, :, :2] = (seg[:, :, :2] * weights).sum(axis=0) / weights.sum(axis=0)
+        out[t, :, 2] = seg[:, :, 2].mean(axis=0)
+
+    return [FramePose(keypoints=out[t]) for t in range(n_frames)]

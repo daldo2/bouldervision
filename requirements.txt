@@ -1,0 +1,24 @@
+# BoulderVision dependencies
+# Pinned to compatible minimum versions; bump as needed.
+
+# --- Core computer vision ---
+ultralytics>=8.1.0        # YOLOv8 detection + pose models
+opencv-python>=4.8.0      # image/video I/O, drawing, HSV color conversion
+numpy>=1.24.0             # array math underlying everything
+
+# --- Config & data ---
+PyYAML>=6.0               # read config/settings.yaml
+
+# --- Phase 2+ (route clustering) ---
+scikit-learn>=1.3.0       # DBSCAN / clustering for route extraction
+
+# --- Dev & exploration ---
+jupyter>=1.0.0            # notebooks/
+pytest>=7.4.0             # tests/
+
+# --- Phase 5 (backend API) — uncomment when you get there ---
+# fastapi>=0.110.0
+# uvicorn[standard]>=0.29.0
+# celery>=5.3.0
+# redis>=5.0.0
+# python-multipart>=0.0.9   # file uploads

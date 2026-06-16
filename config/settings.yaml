@@ -1,0 +1,66 @@
+# BoulderVision configuration
+# Central place for model paths, thresholds, and color definitions so that
+# tuning the system never requires editing Python code.
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+models:
+  # Detection model used by hold_detector.py.
+  # Phase 0/1 MVP uses the generic pretrained yolov8n (auto-downloaded).
+  # Once you fine-tune on holds, point this at models/holds_yolov8n.pt.
+  hold_detector: "yolov8n.pt"
+
+  # Pose model used by pose_estimator.py (Phase 3). yolov8x-pose is the most
+  # accurate; switch to yolov8n-pose for speed.
+  pose_estimator: "yolov8x-pose.pt"
+
+# ---------------------------------------------------------------------------
+# Inference thresholds
+# ---------------------------------------------------------------------------
+detection:
+  confidence: 0.25          # minimum box confidence to keep a detection
+  iou: 0.45                 # NMS IoU threshold (overlap suppression)
+  max_detections: 300       # safety cap on boxes per image
+
+pose:
+  confidence: 0.50          # minimum keypoint confidence to trust a joint
+  touch_distance_px: 40     # hand/foot within this many px of a hold = "touching"
+
+# ---------------------------------------------------------------------------
+# Color classification (HSV)
+# ---------------------------------------------------------------------------
+# OpenCV HSV ranges: H in [0,179], S in [0,255], V in [0,255].
+# Each color may have multiple [lower, upper] ranges (red wraps around H=0/179).
+# A crop is assigned the color whose ranges cover the most of its pixels.
+colors:
+  red:
+    - { lower: [0, 70, 50],    upper: [10, 255, 255] }
+    - { lower: [170, 70, 50],  upper: [179, 255, 255] }   # red wraps the hue circle
+  yellow:
+    - { lower: [20, 70, 70],   upper: [35, 255, 255] }
+  green:
+    - { lower: [36, 50, 50],   upper: [85, 255, 255] }
+  blue:
+    - { lower: [86, 60, 50],   upper: [125, 255, 255] }
+  purple:
+    - { lower: [126, 40, 40],  upper: [160, 255, 255] }
+  black:
+    - { lower: [0, 0, 0],      upper: [179, 255, 60] }     # low value = dark/black
+
+# BGR colors used when drawing each label's bounding box (OpenCV is BGR, not RGB).
+draw_colors:
+  red:    [0, 0, 255]
+  yellow: [0, 255, 255]
+  green:  [0, 255, 0]
+  blue:   [255, 0, 0]
+  purple: [255, 0, 200]
+  black:  [40, 40, 40]
+  unknown: [200, 200, 200]
+
+# ---------------------------------------------------------------------------
+# Paths (relative to project root)
+# ---------------------------------------------------------------------------
+paths:
+  samples_dir: "data/samples"
+  output_image: "data/samples/output.jpg"

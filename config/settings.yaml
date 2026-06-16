@@ -9,7 +9,7 @@ models:
   # Detection model used by hold_detector.py.
   # Phase 0/1 MVP uses the generic pretrained yolov8n (auto-downloaded).
   # Once you fine-tune on holds, point this at models/holds_yolov8n.pt.
-  hold_detector: "yolov8n.pt"
+  hold_detector: "best.pt"
 
   # Pose model used by pose_estimator.py (Phase 3). yolov8x-pose is the most
   # accurate; switch to yolov8n-pose for speed.

@@ -207,20 +207,43 @@ def white_balance(image: np.ndarray) -> np.ndarray:
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
+def center_inset(crop_bgr: np.ndarray, frac: float = 0.6) -> np.ndarray:
+    """Return the central `frac` of a crop (both axes), keeping it non-empty.
+
+    Detector boxes are axis-aligned, so a box around a round/irregular hold
+    necessarily includes wall, shadow, and mat in its corners. Reading color
+    over the whole box lets that background dominate — which is how a saturated
+    blue volume ends up sampled as a dark neutral and named "black". Sampling
+    only the box center keeps us on the hold itself. For tiny crops where the
+    inset would vanish, we return the crop unchanged.
+    """
+    if crop_bgr is None or crop_bgr.size == 0:
+        return crop_bgr
+    h, w = crop_bgr.shape[:2]
+    iy, ix = int(h * (1 - frac) / 2), int(w * (1 - frac) / 2)
+    inner = crop_bgr[iy:h - iy, ix:w - ix]
+    return inner if inner.size else crop_bgr
+
+
 def dominant_color_lab(
     crop_bgr: np.ndarray,
-    sat_min: int = 60,
+    sat_min: int = 45,
     val_min: int = 40,
     val_max: int = 235,
     min_fraction: float = 0.05,
+    center_frac: float = 0.6,
 ) -> Optional[np.ndarray]:
     """Return a hold crop's dominant color as a Lab vector (OpenCV 8-bit scale).
 
     Robustness tricks (this is what makes it survive real photos):
+      - We sample only the box CENTER (`center_frac`), since the corners of an
+        axis-aligned box around a hold are mostly wall/shadow background that
+        would otherwise drag a colored hold toward a dark neutral ("black").
       - We prefer *chromatic* pixels: saturated enough (`sat_min`) and neither
         crushed-dark nor blown-out (`val_min`..`val_max`). This skips chalk dust
         (bright, desaturated), deep shadows, and specular highlights that would
-        otherwise pollute the color.
+        otherwise pollute the color. `sat_min` is deliberately forgiving so
+        glossy/muted holds still register as colored, not achromatic.
       - We take the MEDIAN, not the mean, so a few stray pixels (a bolt, a smear
         of chalk) don't drag the result.
       - If a hold is essentially achromatic (black / white / gray), there are no
@@ -232,6 +255,7 @@ def dominant_color_lab(
     if crop_bgr is None or crop_bgr.size == 0:
         return None
 
+    crop_bgr = center_inset(crop_bgr, center_frac)
     lab = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2LAB).reshape(-1, 3)
     hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV).reshape(-1, 3)
     sat, val = hsv[:, 1], hsv[:, 2]
@@ -297,11 +321,52 @@ def reference_labs(draw_colors: Dict[str, list]) -> Dict[str, np.ndarray]:
     return refs
 
 
-def nearest_color_name(lab: np.ndarray, refs: Dict[str, np.ndarray]) -> str:
-    """Name a Lab color by its nearest reference point. '' if no references."""
-    best_name, best_dist = "", float("inf")
+def _chroma_hue(lab: np.ndarray) -> Tuple[float, float]:
+    """Chroma (distance from neutral) and hue angle (radians) of an 8-bit Lab.
+
+    OpenCV packs a,b around 128 = neutral. Chroma = how colorful (0 for gray);
+    hue = the color's angle on the a*/b* wheel, independent of lightness.
+    """
+    a, b = float(lab[1]) - 128.0, float(lab[2]) - 128.0
+    return float(np.hypot(a, b)), float(np.arctan2(b, a))
+
+
+def nearest_color_name(
+    lab: np.ndarray, refs: Dict[str, np.ndarray], chroma_min: float = 20.0
+) -> str:
+    """Name a Lab color, matching hue for colored holds and lightness for grays.
+
+    Plain Euclidean distance in Lab conflates lightness, saturation and hue, so
+    a muted real-world blue (dark, low-chroma) lands nearer pure *black* than
+    pure *blue*. Instead we split the decision:
+
+      - A color is "neutral" if its chroma is below `chroma_min`. Neutral holds
+        are named by the nearest neutral reference in lightness (L) only — this
+        is what separates black from white.
+      - A "colored" hold is named by the nearest reference in *hue angle*, which
+        ignores how dark or washed-out the photo made it. Only chromatic
+        references compete here, so a dim blue still reads as blue.
+
+    Falls back to plain Lab distance if the palette has no usable references.
+    '' if there are no references at all.
+    """
+    if not refs:
+        return ""
+
+    target_chroma, target_hue = _chroma_hue(lab)
+    neutral_refs, colored_refs = {}, {}
     for name, ref_lab in refs.items():
-        dist = float(np.linalg.norm(lab - ref_lab))
-        if dist < best_dist:
-            best_dist, best_name = dist, name
-    return best_name
+        chroma, hue = _chroma_hue(ref_lab)
+        (colored_refs if chroma >= chroma_min else neutral_refs)[name] = (ref_lab, hue)
+
+    if target_chroma < chroma_min and neutral_refs:
+        return min(neutral_refs, key=lambda n: abs(lab[0] - neutral_refs[n][0][0]))
+
+    if colored_refs:
+        def hue_gap(name: str) -> float:
+            d = abs(target_hue - colored_refs[name][1])
+            return min(d, 2 * np.pi - d)  # wrap-around on the color wheel
+        return min(colored_refs, key=hue_gap)
+
+    # No reference of the needed kind: fall back to nearest full-Lab point.
+    return min(refs, key=lambda n: float(np.linalg.norm(lab - refs[n])))

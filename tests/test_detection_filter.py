@@ -59,6 +59,14 @@ def test_colored_hold_is_not_a_marker():
     assert df.classify_detection((488, 488, 512, 512), 0, img, FCFG) == df.HOLD
 
 
+def test_small_dark_but_irregular_is_not_a_marker():
+    # Small, dark, near-square box, but the dark blob is a triangle, not round.
+    img = np.full((1000, 1000, 3), 180, dtype=np.uint8)
+    cv2.fillPoly(img, [np.array([[500, 488], [512, 512], [488, 512]])], (10, 10, 10))
+    # Fails the circularity gate -> stays a hold, not a marker.
+    assert df.classify_detection((488, 488, 512, 512), 0, img, FCFG) == df.HOLD
+
+
 def test_normal_hold_passes_through():
     img = np.full((1000, 1000, 3), 180, dtype=np.uint8)
     cv2.circle(img, (500, 500), 30, (0, 0, 255), -1)  # medium red hold

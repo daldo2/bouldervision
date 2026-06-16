@@ -23,6 +23,7 @@ import sys
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -83,17 +84,42 @@ def classify_detection(
     if cls == fcfg["volume_class"] or area_frac >= fcfg["volume_area_frac"]:
         return VOLUME
 
-    # 3. Start/zone marker: small, round-ish, dark, near-neutral black dot.
+    # 3. Start/zone marker: small, dark, near-neutral AND actually circular.
+    #    The circularity test is what stops small dark *holds* (irregular blobs)
+    #    on a wide shot from being mistaken for round stickers.
     if area_frac <= fcfg["marker_max_area_frac"] and aspect <= fcfg["marker_max_aspect"]:
         x1, y1, x2, y2 = box
         crop = image_bgr[max(0, y1):y2, max(0, x1):x2]
         lab = utils.dominant_color_lab(crop)
         if lab is not None:
             chroma, _ = utils._chroma_hue(lab)
-            if lab[0] <= fcfg["marker_dark_l_max"] and chroma <= fcfg["marker_chroma_max"]:
+            dark_neutral = lab[0] <= fcfg["marker_dark_l_max"] and chroma <= fcfg["marker_chroma_max"]
+            if dark_neutral and dark_blob_circularity(crop, fcfg["marker_dark_l_max"]) >= fcfg["marker_min_circularity"]:
                 return MARKER
 
     return HOLD
+
+
+def dark_blob_circularity(crop_bgr: np.ndarray, dark_l_max: float) -> float:
+    """How circular is the dark region inside a crop (0..~1; 1 = perfect circle).
+
+    Thresholds the dark pixels (Lab L below `dark_l_max`), takes the largest
+    contour, and returns 4*pi*area / perimeter^2. A round sticker scores ~1; an
+    irregular dark hold scores lower. Returns 0 when there is nothing to measure.
+    """
+    if crop_bgr is None or crop_bgr.size == 0:
+        return 0.0
+    lab_l = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2LAB)[:, :, 0]
+    mask = (lab_l <= dark_l_max).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 0.0
+    c = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(c)
+    perim = cv2.arcLength(c, True)
+    if perim <= 0 or area <= 0:
+        return 0.0
+    return float(4.0 * np.pi * area / (perim * perim))
 
 
 def classify_detections(

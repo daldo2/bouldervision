@@ -42,6 +42,7 @@ filter:
   marker_max_aspect: 1.4    # ...and roughly square (a circle's box)
   marker_dark_l_max: 90     # ...and very dark (OpenCV Lab L, 0-255)
   marker_chroma_max: 18     # ...and near-neutral (low chroma) — i.e. a black dot
+  marker_min_circularity: 0.80   # ...and the dark blob is actually round (square=0.79, circle=0.83+)
 
 # ---------------------------------------------------------------------------
 # Route extraction (Phase 2) — holds are grouped into routes by clustering their
@@ -53,6 +54,13 @@ routes:
   spatial_min_holds: 1      # raise to drop isolated holds as noise (route needs >= this many nearby)
   adaptive_spatial: true    # measure spacing in hold-widths, not pixels — robust to angled photos
   spatial_scale_eps: 8.0    # max gap between holds in units of hold size (adaptive mode)
+
+# ---------------------------------------------------------------------------
+# Color naming — turning a hold's Lab color into a name (red/blue/black/...).
+# ---------------------------------------------------------------------------
+color_naming:
+  chroma_min: 16            # below this Lab chroma a hold is "neutral" (black/white/gray);
+                            # lower = name more muted/dim holds as colored, but riskier (noise)
 
 # ---------------------------------------------------------------------------
 # Perspective rectification — for photos taken at a steep angle to the wall.
@@ -116,3 +124,4 @@ paths:
   output_dir: "data/output"
   output_image: "data/output/output.jpg"     # hold detection + color labels
   routes_image: "data/output/routes.jpg"      # holds grouped into routes
+  holds_image: "data/output/holds.jpg"        # per-hold detected color, NOT grouped

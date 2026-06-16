@@ -222,6 +222,7 @@ def extract_routes(
     references: Optional[Dict[str, np.ndarray]] = None,
     adaptive_spatial: bool = False,
     spatial_scale_eps: float = 8.0,
+    chroma_min: float = 16.0,
 ) -> List[Route]:
     """Turn a flat list of holds into named routes.
 
@@ -245,7 +246,7 @@ def extract_routes(
     for color_group in cluster_by_color(holds, eps=color_eps):
         for route_holds in split(color_group):
             rep_lab = np.median([h.lab for h in route_holds], axis=0).astype(np.float64)
-            name = utils.nearest_color_name(rep_lab, references) if references else ""
+            name = utils.nearest_color_name(rep_lab, references, chroma_min) if references else ""
             for h in route_holds:
                 h.name = name
             routes.append(Route(color_name=name, lab=rep_lab, holds=route_holds))

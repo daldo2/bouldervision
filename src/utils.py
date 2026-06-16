@@ -332,7 +332,7 @@ def _chroma_hue(lab: np.ndarray) -> Tuple[float, float]:
 
 
 def nearest_color_name(
-    lab: np.ndarray, refs: Dict[str, np.ndarray], chroma_min: float = 20.0
+    lab: np.ndarray, refs: Dict[str, np.ndarray], chroma_min: float = 16.0
 ) -> str:
     """Name a Lab color, matching hue for colored holds and lightness for grays.
 

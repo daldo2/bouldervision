@@ -267,6 +267,55 @@ def run(image_path: str, config_path: str | None = None) -> str:
     return output_path
 
 
+def run_holds(image_path: str, config_path: str | None = None) -> str:
+    """Detect holds and draw each one in its OWN detected color, without grouping
+    them into routes. Useful for inspecting raw detection + color quality.
+
+    Volumes / markers / tape are still set aside and overlaid in neutral colors.
+    Returns the output path.
+    """
+    import route_extractor as rex
+    import detection_filter as dfilt
+
+    config = utils.load_config(config_path) if config_path else utils.load_config()
+    image = utils.read_image(image_path)
+
+    model = load_detector(config["models"]["hold_detector"])
+    det = config["detection"]
+    raw = detect_objects(model, image, det["confidence"], det["iou"], det["max_detections"])
+    dets = dfilt.classify_detections(raw, image, config["filter"])
+
+    print("[3/4] Reading per-hold colors (no route grouping)...")
+    holds = rex.build_holds(image, dfilt.holds_only(dets))
+    refs = utils.reference_labs(config["draw_colors"])
+    chroma_min = config.get("color_naming", {}).get("chroma_min", 16.0)
+    draw_colors = config["draw_colors"]
+
+    annotated = image.copy()
+    counts: dict = {}
+    for h in holds:
+        name = utils.nearest_color_name(h.lab, refs, chroma_min)
+        counts[name] = counts.get(name, 0) + 1
+        utils.draw_box(annotated, h.box, name, utils.draw_color_for(name, draw_colors))
+    aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200), dfilt.TAPE: (200, 200, 0)}
+    aside = {k: 0 for k in aside_style}
+    for d in dets:
+        if d.kind in aside_style:
+            aside[d.kind] += 1
+            utils.draw_box(annotated, d.box, d.kind, aside_style[d.kind])
+
+    output_path = utils.resolve_path(config["paths"]["holds_image"])
+    print(f"[4/4] Saving per-hold map to: {output_path}")
+    utils.save_image(annotated, output_path)
+
+    print("-" * 40)
+    print(f"{len(holds)} holds by color: " + ", ".join(f"{n}={c}" for n, c in sorted(counts.items(), key=lambda x: -x[1])))
+    set_aside = ", ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in aside.items() if n)
+    if set_aside:
+        print(f"Set aside (not holds): {set_aside}")
+    return output_path
+
+
 def run_routes(image_path: str, config_path: str | None = None, corners=None) -> str:
     """End-to-end Phase 1+2: detect holds, read their colors, group into routes,
     draw the route map, save it. Returns the output path.
@@ -324,6 +373,7 @@ def run_routes(image_path: str, config_path: str | None = None, corners=None) ->
         references=refs,
         adaptive_spatial=rcfg.get("adaptive_spatial", False),
         spatial_scale_eps=rcfg.get("spatial_scale_eps", 8.0),
+        chroma_min=config.get("color_naming", {}).get("chroma_min", 16.0),
     )
 
     # 4. Draw and save the route map. Overlay set-aside detections in distinct
@@ -364,6 +414,11 @@ def main() -> None:
         help="Group detected holds into routes (Phase 2) and draw a route map.",
     )
     parser.add_argument(
+        "--holds",
+        action="store_true",
+        help="Draw each detected hold in its own color WITHOUT grouping into routes.",
+    )
+    parser.add_argument(
         "--config",
         default=None,
         help="Optional path to a settings.yaml (defaults to config/settings.yaml).",
@@ -382,7 +437,9 @@ def main() -> None:
         if len(corners) != 4:
             parser.error("--corners needs exactly 4 'x,y' points")
 
-    if args.routes or corners:
+    if args.holds:
+        output_path = run_holds(args.image, args.config)
+    elif args.routes or corners:
         output_path = run_routes(args.image, args.config, corners=corners)
     else:
         output_path = run(args.image, args.config)

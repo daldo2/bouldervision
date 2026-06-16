@@ -175,3 +175,96 @@ def save_image(image: np.ndarray, path: str) -> None:
     """Write an image to disk, creating the parent directory if needed."""
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     cv2.imwrite(path, image)
+
+
+# ---------------------------------------------------------------------------
+# 4. Color vectors for route clustering (Phase 2)
+# ---------------------------------------------------------------------------
+# The HSV name classifier above maps a hold to a fixed name (red/blue/...). That
+# is great for a human-readable label, but fixed names don't generalize across
+# gyms (different lighting, white balance, palettes). For grouping holds into
+# routes we instead work with each hold's *actual* color as a vector in CIELAB —
+# a perceptually uniform space where Euclidean distance ≈ how different two
+# colors look to the eye — and cluster those vectors PER IMAGE (see
+# route_extractor.py). The helpers below produce those vectors.
+#
+# Note: OpenCV's 8-bit Lab packs L into 0-255 and a,b into 0-255 (128 = neutral).
+# We keep that scale throughout; clustering thresholds are tuned to match it.
+
+def white_balance(image: np.ndarray) -> np.ndarray:
+    """Gray-world white balance: cancel a global color cast from lighting/camera.
+
+    The gray-world assumption says the average color of a varied scene should be
+    gray; if it isn't, we scale each channel to make it so. This removes much of
+    the gym-to-gym lighting difference BEFORE we read hold colors, which is what
+    lets the same color land in the same place across different photos.
+    """
+    result = image.astype(np.float32)
+    channel_means = result.reshape(-1, 3).mean(axis=0)  # B, G, R means
+    gray = float(channel_means.mean())
+    scale = gray / (channel_means + 1e-6)
+    result *= scale
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def dominant_color_lab(
+    crop_bgr: np.ndarray,
+    sat_min: int = 60,
+    val_min: int = 40,
+    val_max: int = 235,
+    min_fraction: float = 0.05,
+) -> Optional[np.ndarray]:
+    """Return a hold crop's dominant color as a Lab vector (OpenCV 8-bit scale).
+
+    Robustness tricks (this is what makes it survive real photos):
+      - We prefer *chromatic* pixels: saturated enough (`sat_min`) and neither
+        crushed-dark nor blown-out (`val_min`..`val_max`). This skips chalk dust
+        (bright, desaturated), deep shadows, and specular highlights that would
+        otherwise pollute the color.
+      - We take the MEDIAN, not the mean, so a few stray pixels (a bolt, a smear
+        of chalk) don't drag the result.
+      - If a hold is essentially achromatic (black / white / gray), there are no
+        chromatic pixels — we then fall back to the median over all pixels, which
+        still separates black (low L) from white (high L).
+
+    Returns None for an empty crop.
+    """
+    if crop_bgr is None or crop_bgr.size == 0:
+        return None
+
+    lab = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2LAB).reshape(-1, 3)
+    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    sat, val = hsv[:, 1], hsv[:, 2]
+
+    chromatic = (sat >= sat_min) & (val >= val_min) & (val <= val_max)
+    if int(chromatic.sum()) >= max(1, int(min_fraction * chromatic.size)):
+        selected = lab[chromatic]
+    else:
+        selected = lab  # achromatic hold — use everything (captures L for B/W)
+
+    return np.median(selected, axis=0).astype(np.float64)
+
+
+def reference_labs(draw_colors: Dict[str, list]) -> Dict[str, np.ndarray]:
+    """Build name -> Lab reference points from the draw_colors palette.
+
+    Used only to attach a human-readable name to a discovered color cluster; it
+    does NOT drive the grouping itself.
+    """
+    refs: Dict[str, np.ndarray] = {}
+    for name, bgr in draw_colors.items():
+        if name == "unknown":
+            continue
+        px = np.uint8([[list(bgr)]])
+        refs[name] = cv2.cvtColor(px, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float64)
+    return refs
+
+
+def nearest_color_name(lab: np.ndarray, refs: Dict[str, np.ndarray]) -> str:
+    """Name a Lab color by its nearest reference point. '' if no references."""
+    best_name, best_dist = "", float("inf")
+    for name, ref_lab in refs.items():
+        dist = float(np.linalg.norm(lab - ref_lab))
+        if dist < best_dist:
+            best_dist, best_name = dist, name
+    return best_name

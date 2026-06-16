@@ -73,13 +73,23 @@ with its detected color and confidence.
 
 **Goal:** Turn a bag of colored holds into discrete routes ("problems").
 
+**Approach (implemented):** Instead of matching holds to a fixed global palette
+(which doesn't generalize across gyms — different lighting/white balance/color
+schemes), we read each hold's actual color as a CIELAB vector and **cluster
+those vectors per image**. Route grouping is relative, so it survives lighting
+drift. Fixed names only label the clusters for humans. See
+`src/route_extractor.py` (`cluster_by_color` → `split_by_position`).
+
 **Tasks**
-- Group holds by color: same color ⇒ candidate for the same route.
-- Spatial filtering: drop outliers that are far from the route's body
-  (e.g. via DBSCAN on hold centroids, or distance-from-centroid threshold) to
-  handle two routes that happen to share a color on different wall sections.
-- Order holds bottom-to-top to suggest a climbing sequence.
-- Visualize each route distinctly (connected line / number labels).
+- [x] Read each hold's dominant color robustly (Lab median, ignoring chalk /
+  shadows / highlights) — `utils.dominant_color_lab`.
+- [x] Gray-world white balance to reduce gym-to-gym lighting cast.
+- [x] Cluster holds by color (DBSCAN in Lab) into route candidates.
+- [x] Spatial split (DBSCAN on centroids) for two routes sharing a color.
+- [x] Name each route by nearest reference color; full `extract_routes` + tests.
+- [ ] Order holds bottom-to-top to suggest a climbing sequence.
+- [ ] Visualize each route distinctly (connected line / number labels).
+- [ ] Tune `color_eps` / `spatial_eps_px` on real detections once the model lands.
 
 **Deliverable:** An image where each route is drawn as a labeled, connected set
 of holds.

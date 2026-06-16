@@ -28,6 +28,15 @@ pose:
   touch_distance_px: 40     # hand/foot within this many px of a hold = "touching"
 
 # ---------------------------------------------------------------------------
+# Route extraction (Phase 2) — holds are grouped into routes by clustering their
+# real colors per image, then split spatially. See src/route_extractor.py.
+# ---------------------------------------------------------------------------
+routes:
+  color_eps: 28             # max Lab distance for two holds to share a color (smaller = stricter)
+  spatial_eps_px: 250       # max pixel distance for holds to be the same route
+  spatial_min_holds: 1      # raise to drop isolated holds as noise (route needs >= this many nearby)
+
+# ---------------------------------------------------------------------------
 # Color classification (HSV)
 # ---------------------------------------------------------------------------
 # OpenCV HSV ranges: H in [0,179], S in [0,255], V in [0,255].

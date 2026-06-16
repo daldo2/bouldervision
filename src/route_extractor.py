@@ -67,6 +67,15 @@ class Route:
     def hold_count(self) -> int:
         return len(self.holds)
 
+    @property
+    def ordered_holds(self) -> List[Hold]:
+        """Holds bottom-to-top — a first guess at the climbing sequence.
+
+        Image y grows downward, so the lowest hold (the start) has the largest y.
+        We sort by y descending; ties broken left-to-right for stability.
+        """
+        return sorted(self.holds, key=lambda h: (-h.center[1], h.center[0]))
+
 
 # ---------------------------------------------------------------------------
 # Clustering steps

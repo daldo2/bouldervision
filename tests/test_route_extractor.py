@@ -125,3 +125,22 @@ def test_build_holds_skips_empty_crop():
     # Degenerate box (zero area) should be skipped, not crash.
     boxes = [(50, 50, 50, 50, 0.5)]
     assert re.build_holds(img, boxes) == []
+
+
+# --- ordering & drawing ----------------------------------------------------
+def test_ordered_holds_bottom_to_top():
+    top = hold(RED, (100, 50))      # small y = high on the wall
+    mid = hold(RED, (100, 250))
+    bottom = hold(RED, (100, 450))  # large y = low on the wall = start
+    route = re.Route(color_name="red", lab=lab_of(RED), holds=[top, bottom, mid])
+    ys = [h.center[1] for h in route.ordered_holds]
+    assert ys == [450, 250, 50]  # start at the bottom, climb upward
+
+
+def test_draw_routes_does_not_crash():
+    img = np.full((500, 500, 3), 180, dtype=np.uint8)
+    holds = [hold(RED, (100, 400)), hold(RED, (150, 300)), hold(BLUE, (400, 400))]
+    routes = re.extract_routes(holds, color_eps=28, spatial_eps_px=200)
+    out = utils.draw_routes(img, routes)
+    assert out.shape == img.shape
+    assert out is not img  # drew on a copy

@@ -245,6 +245,43 @@ def dominant_color_lab(
     return np.median(selected, axis=0).astype(np.float64)
 
 
+def lab_to_bgr(lab: np.ndarray) -> Tuple[int, int, int]:
+    """Convert an OpenCV 8-bit Lab vector back to a BGR tuple (for drawing)."""
+    px = np.clip(np.round(lab), 0, 255).astype(np.uint8).reshape(1, 1, 3)
+    bgr = cv2.cvtColor(px, cv2.COLOR_LAB2BGR)[0, 0]
+    return (int(bgr[0]), int(bgr[1]), int(bgr[2]))
+
+
+def draw_routes(image: np.ndarray, routes) -> np.ndarray:
+    """Draw each route on a copy of `image`: holds in the route's own color,
+    connected bottom-to-top, with a number + color name label at the start hold.
+
+    `routes` is a list of route_extractor.Route. Returns the annotated copy.
+    """
+    annotated = image.copy()
+
+    for idx, route in enumerate(routes, start=1):
+        bgr = lab_to_bgr(route.lab)            # draw the route in its real color
+        ordered = route.ordered_holds          # bottom-to-top climbing order
+
+        # Connect consecutive holds to suggest the sequence.
+        pts = [(int(h.center[0]), int(h.center[1])) for h in ordered]
+        for a, b in zip(pts, pts[1:]):
+            cv2.line(annotated, a, b, bgr, thickness=2, lineType=cv2.LINE_AA)
+
+        # Outline every hold in the route's color.
+        for hold in ordered:
+            x1, y1, x2, y2 = hold.box
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), bgr, thickness=2)
+
+        # Label the route at its start (lowest) hold.
+        if pts:
+            label = f"#{idx} {route.color_name}".strip()
+            draw_box(annotated, ordered[0].box, label, bgr)
+
+    return annotated
+
+
 def reference_labs(draw_colors: Dict[str, list]) -> Dict[str, np.ndarray]:
     """Build name -> Lab reference points from the draw_colors palette.
 

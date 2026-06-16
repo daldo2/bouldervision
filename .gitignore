@@ -21,9 +21,13 @@ models/*.pt
 models/*.onnx
 
 # --- Data ---
-# input/  holds the things you analyze. Small sample images (e.g. wall.jpg) are
-#         tracked; large media (videos) are not. output/ is fully generated, so
-#         nothing in it is committed except the .gitkeep that preserves the dir.
+# input/  holds the things you analyze. The tiny synthetic wall.jpg is tracked
+#         as a smoke-test sample; real gym photos (*.jpeg/*.jpg) and videos stay
+#         local, out of the public repo. output/ is fully generated — nothing in
+#         it is committed except the .gitkeep that preserves the dir.
+data/input/*.jpeg
+data/input/*.jpg
+!data/input/wall.jpg
 data/output/*
 !data/output/.gitkeep
 *.mp4

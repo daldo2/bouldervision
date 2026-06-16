@@ -30,6 +30,8 @@ data/input/*.jpg
 !data/input/wall.jpg
 data/output/*
 !data/output/.gitkeep
+# bootstrap labels + copied private photos (regenerate with scripts/export_for_annotation.py)
+data/annotation/
 *.mp4
 *.mov
 *.avi

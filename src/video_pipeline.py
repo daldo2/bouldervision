@@ -76,6 +76,7 @@ def analyze_video(
     start_frame: int = 0,
     max_frames: Optional[int] = None,
     stabilize: bool = False,
+    route_color: Optional[str] = None,
 ) -> List[FrameAnalysis]:
     """Run the full analysis pipeline over a video file.
 
@@ -134,6 +135,8 @@ def analyze_video(
         ok, dframe = cap.read()
         if ok:
             hold_boxes = detect_at(dframe)
+            if route_color:
+                hold_boxes = _filter_by_color(dframe, hold_boxes, route_color, config)
             ref_boxes = list(hold_boxes)
             if stabilize:
                 import stabilize as stab  # lazy: only needed for handheld clips
@@ -260,12 +263,15 @@ def main() -> None:
                         help="Moving camera: re-detect holds every N frames (default 0 = once).")
     parser.add_argument("--stabilize", action="store_true",
                         help="Handheld camera: warp the static holds to follow the camera each frame.")
+    parser.add_argument("--route-color", default=None,
+                        help="Analyze only one route: keep holds of this color (red/blue/green/...).")
     args = parser.parse_args()
 
     timeline = analyze_video(
         args.video, output_path=args.out, config_path=args.config,
         detect_every=args.detect_every, detect_frame=args.detect_frame,
         start_frame=args.start_frame, max_frames=args.max_frames, stabilize=args.stabilize,
+        route_color=args.route_color,
     )
     # Translate the "real route hold" dwell threshold from seconds to frames.
     cap = cv2.VideoCapture(args.video)
@@ -276,6 +282,24 @@ def main() -> None:
     print_summary(timeline, primary_min_frames=min_frames)
     if args.out:
         print(f"Annotated video: {args.out}")
+
+
+def _filter_by_color(frame, boxes, color, config):
+    """Keep only holds whose dominant color matches `color` — isolate one route.
+
+    Uses the Phase-2 color machinery (per-hold Lab + nearest palette name). Prints
+    which colors are present so the user can pick a valid one.
+    """
+    import route_extractor as rex
+    refs = utils.reference_labs(config["draw_colors"])
+    chroma_min = config.get("color_naming", {}).get("chroma_min", 12)
+    holds = rex.build_holds(frame, [(*b, 1.0) for b in boxes])
+    named = [(h.box, utils.nearest_color_name(h.lab, refs, chroma_min)) for h in holds]
+    present = Counter(n for _, n in named)
+    print(f"     route filter: colors on wall = {dict(present.most_common())}")
+    kept = [box for box, n in named if n == color]
+    print(f"     route filter: keeping {len(kept)} '{color}' holds (of {len(boxes)} detected)")
+    return kept
 
 
 def _draw_frame(frame, hold_boxes, poses, contacts, points=None) -> None:

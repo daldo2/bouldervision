@@ -207,6 +207,50 @@ def frame_contacts(
     return result
 
 
+def flag_implausible_keypoints(
+    poses: List[FramePose], collapse_px: float = 40.0, jump_px: float = 120.0
+) -> List[FramePose]:
+    """Mark mislocalized/occluded contact joints as unreliable (confidence -> 0).
+
+    The model emits a confident position even for a hidden limb, often by
+    collapsing one joint onto its partner (both ankles on one foot during a wide
+    split) or teleporting it across the frame. We detect these *geometrically*,
+    not by trusting confidence:
+
+      - COLLAPSE: the left and right wrist (or ankle) sit within `collapse_px` of
+        each other — impossible for real hands/feet, so the one that moved more
+        from the previous frame is the mislocated one and gets zeroed.
+      - JUMP: a joint that leapt more than `jump_px` between frames (faster than a
+        limb can move) is zeroed for that frame.
+
+    Zeroing the confidence makes downstream treat the limb as occluded: smoothing
+    interpolates it from neighbours, contact resolution holds its last hold
+    instead of grabbing a wrong one, and the overlay shows nothing rather than a
+    false marker. Pure: returns new FramePoses.
+    """
+    if not poses:
+        return list(poses)
+    seq = [p.keypoints.copy() for p in poses]
+    pairs = [(9, 10), (15, 16)]  # (left, right) wrist, then ankle
+    for t, cur in enumerate(seq):
+        prev = seq[t - 1] if t > 0 else None
+        for li, ri in pairs:
+            lx, ly, lc = cur[li]
+            rx, ry, rc = cur[ri]
+            if lc <= 0 or rc <= 0:
+                continue
+            if math.hypot(lx - rx, ly - ry) < collapse_px and prev is not None:
+                lmove = math.hypot(lx - prev[li][0], ly - prev[li][1]) if prev[li][2] > 0 else float("inf")
+                rmove = math.hypot(rx - prev[ri][0], ry - prev[ri][1]) if prev[ri][2] > 0 else float("inf")
+                cur[li if lmove > rmove else ri][2] = 0.0  # the jumper is the bad one
+        if prev is not None:
+            for idx in (9, 10, 15, 16):
+                if cur[idx][2] > 0 and prev[idx][2] > 0 and \
+                        math.hypot(cur[idx][0] - prev[idx][0], cur[idx][1] - prev[idx][1]) > jump_px:
+                    cur[idx][2] = 0.0
+    return [FramePose(keypoints=k) for k in seq]
+
+
 def enforce_lr_consistency(poses: List[FramePose], min_conf: float = 0.3) -> List[FramePose]:
     """Fix left/right limb-label swaps across a pose sequence.
 

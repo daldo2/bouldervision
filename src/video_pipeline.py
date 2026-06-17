@@ -266,10 +266,17 @@ def analyze_video(
     finally:
         cap.release()
 
-    # NOTE: greedy left/right re-labeling (enforce_lr_consistency) was tried here
-    # but it corrupts the stable foot when ONE ankle keypoint collapses onto the
-    # other (not a clean swap). The per-limb mode filter below handles the
-    # resulting oscillation more robustly, so we don't re-label.
+    # Flag occluded / mislocalized contact joints (e.g. an ankle collapsing onto
+    # the other foot in a split) as unreliable, so they don't fabricate contacts.
+    # (Greedy L/R re-labeling was tried instead but corrupted the stable foot.)
+    present = [m for m in per_frame if m["pose"] is not None]
+    if len(present) > 1:
+        flagged = pose_estimator.flag_implausible_keypoints(
+            [m["pose"] for m in present],
+            collapse_px=pose_cfg.get("collapse_px", 40),
+            jump_px=pose_cfg.get("jump_px", 120))
+        for m, fp in zip(present, flagged):
+            m["pose"] = fp
 
     # Temporal keypoint smoothing (steadies jitter, e.g. during a wide split).
     window = pose_cfg.get("smooth_window", 1)

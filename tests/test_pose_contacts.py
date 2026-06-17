@@ -142,6 +142,31 @@ def test_sticky_releases_then_engages_new_hold_when_settled():
     assert got[0] == 0 and got[2] is None and got[-1] == 1
 
 
+def test_flag_collapse_zeroes_the_jumped_joint():
+    # Left ankle stable at x=100; right ankle at x=300 then collapses onto the
+    # left (x=100) -> the right (the one that jumped) is marked unreliable.
+    def pose(lx, rx):
+        kp = np.zeros((17, 3), dtype=float)
+        kp[15] = (lx, 400, 0.9)  # left ankle
+        kp[16] = (rx, 400, 0.9)  # right ankle
+        return pe.FramePose(keypoints=kp)
+    seq = [pose(100, 300), pose(100, 110)]  # right jumps from 300 to 110 (collapse)
+    out = pe.flag_implausible_keypoints(seq, collapse_px=40, jump_px=1000)
+    assert out[1].keypoints[16][2] == 0.0   # right ankle flagged occluded
+    assert out[1].keypoints[15][2] == 0.9   # left ankle untouched
+
+
+def test_flag_jump_zeroes_teleported_joint():
+    def pose(x):
+        kp = np.zeros((17, 3), dtype=float)
+        kp[9] = (x, 200, 0.9)        # left wrist
+        kp[10] = (800, 200, 0.9)     # right wrist far away (no collapse)
+        return pe.FramePose(keypoints=kp)
+    seq = [pose(100), pose(400)]     # left wrist leaps 300px
+    out = pe.flag_implausible_keypoints(seq, collapse_px=40, jump_px=120)
+    assert out[1].keypoints[9][2] == 0.0
+
+
 def test_lr_consistency_unswaps_flipped_labels():
     # Left foot near x=100, right foot near x=300, steady across frames — but
     # frame 1 has the labels swapped. Consistency should restore them.

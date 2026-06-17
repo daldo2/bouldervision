@@ -6,13 +6,16 @@ them by color, group same-colored holds into routes, track climber pose, and
 
 ## How to run
 
-The project uses a local virtualenv at `.venv` (Python 3.14, with torch +
-ultralytics already installed). Heavy ML deps are NOT system-installed.
+The project uses a local virtualenv at `.venv` (Python 3.14). Installed ML deps:
+torch + ultralytics (detection, yolov8 pose), **rtmlib + onnxruntime** (RTMPose
+pose backend — the default), mediapipe (alternate pose backend). NOT system-installed.
 
 ```bash
 source .venv/bin/activate
-python -m src.hold_detector data/input/wall.jpg   # writes data/output/output.jpg
-pytest -q                                          # 8 offline tests
+python -m src.hold_detector data/input/wall.jpg            # Phase 1: detect + color
+python -m src.hold_detector data/input/<img>.jpg --routes  # Phase 1+2: routes (also --holds)
+python -m src.video_pipeline data/input/<vid>.mp4 --out out.mp4  # Phase 3: pose + contacts + beta
+pytest -q                                                  # 81 offline tests
 ```
 
 Run modules with `python -m src.<name>` (package imports), not as loose scripts.
@@ -44,34 +47,40 @@ tests/                 # offline-safe: exercise color logic, never load a model
   hold-specific model is fine-tuned (Phase 1 follow-up, see `models/README.md`).
 - All tunables (thresholds, colors, paths) live in `config/settings.yaml`.
 
-## Status (as of 2026-06-16)
+## Status (as of 2026-06-17)
 
-- GitHub: https://github.com/daldo2/bouldervision (public). Branch: `master`. 37 tests, all offline.
-- **Phase 1 (holds + color):** done & wired. HSV palette expanded for real walls
-  (added orange/white); `scripts/inspect_hsv.py` for tuning.
-- **Phase 2 (routes):** done & wired. Holds grouped by clustering their real
-  CIELAB colors per image (generalizes across gyms), then split spatially.
-  Run with `--routes`. Drawing + bottom-to-top ordering implemented.
-- **Phase 3 (pose/contacts):** all model-free logic done & tested — `touched_holds`
-  (limb→hold proximity), `smooth_keypoint_sequence`, `analyze_video` loop wired
-  (lazy models), `summarize_contacts`/`holds_used`. Needs real footage to run.
-- **Full pipeline command:** `python -m src.hold_detector <img> --routes`
-  (detect → Lab color → cluster routes → draw). Ready the moment `models/holds.pt` exists.
+GitHub: https://github.com/daldo2/bouldervision (public). Branch: `master`. **81 tests**
+(offline; model runs are separate). The trained hold detector `models/best.pt`
+arrived and is wired (`models.hold_detector: best.pt`) — detection works well.
 
-### Waiting on (external, as of 2026-06-16)
-1. **`models/holds.pt`** — user training a YOLOv8 hold detector on Colab (free T4,
-   public Roboflow "Climbing Holds and Volumes" dataset, ~100 epochs). When the
-   `best.pt` arrives: drop it as `models/holds.pt`, set `hold_detector` in
-   `config/settings.yaml`, run on the 8 real gym photos in `data/input/`
-   (gitignored), tune `routes.color_eps` / `spatial_eps_px`.
-2. **Climbing videos** — user sending in the evening (static camera, whole climber
-   in frame, 2-3s empty-wall start frame). Then run Phase 3, tune `pose.touch_distance_px`.
+- **Phase 1 (holds + color):** done. Real detector in use.
+- **Phase 2 (routes):** done & tuned. Per-image CIELAB clustering, spatial split,
+  hue-aware naming. Palette gained **pink + cyan** (the gym uses them). Color
+  threshold tuned via the eval harness — `scripts/eval_colors.py` + `eval/labels.yaml`
+  (recall 0.70→0.90). Run `--routes`; `--holds` draws per-hold colors without grouping.
+- **Phase 2.5 (real-photo robustness):** `src/detection_filter.py` sets aside
+  volumes/markers/tape (only holds form routes); adaptive spatial split (hold-width
+  relative); homography rectification for angled walls (`--corners`). See
+  `docs/annotation-retrain.md` for the planned richer-class detector retrain.
+- **Phase 3 (video: pose + contacts + beta):** WORKING on real footage.
+  `python -m src.video_pipeline <vid> --out out.mp4`. Pose via **RTMPose** (default,
+  top-down, best for small/odd-posed climbers — beat yolov8 & MediaPipe in an A/B);
+  switch with `models.pose_backend`. Contacts: extremity points + velocity gate +
+  sticky resolution + occlusion/implausible-keypoint detection + mode filter.
+  Outputs: annotated video, contact summary, and a **move sequence ("beta")**.
+  Extras: `--route-color` (analyze one route), `--stabilize` (handheld).
+
+### Pending / next
+1. **Richer-class detector retrain** — user shooting ~50–100 more gym photos
+   (~2026-06-18). Workflow: `scripts/export_for_annotation.py` → correct in
+   Roboflow (volume/downclimb/marker classes) → fine-tune. See `docs/annotation-retrain.md`.
+2. **Climbing-fine-tuned POSE model** — the deeper accuracy fix for extreme poses
+   (RTMPose got us most of the way; off-the-shelf 2D pose can't fully nail a wide
+   split). Needs keypoint annotation on climbing frames.
+3. **Phase 4 (force estimation)** — deferred; now has pose+contacts timeline as input.
 
 ### Environment notes
-- No local GPU (training is cloud-only). `.venv` (Python 3.14) has torch+ultralytics.
+- No local GPU. `.venv` (Python 3.14): torch+ultralytics, rtmlib+onnxruntime, mediapipe.
+- RTMPose on CPU ≈ 10–15 min per ~2 min clip; render ONE video at a time (don't
+  fan out heavy jobs — it oversubscribes the 16 cores).
 - Real gym photos & videos stay local (gitignored); only synthetic `wall.jpg` is tracked.
-
-## Next steps
-1. (Blocked on `best.pt`) Run Phase 1+2 on real photos; tune color/spatial eps.
-2. (Blocked on videos) Run Phase 3 on footage; tune touch distance; polish overlay.
-3. Phase 4 (force estimation) — research phase, needs pose data from real videos first.

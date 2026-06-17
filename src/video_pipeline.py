@@ -211,13 +211,17 @@ def analyze_video(
     detector = hold_detector.load_detector(config["models"]["hold_detector"])
     # Pick the pose backend; both expose load_pose_model / estimate_pose and return
     # FramePoses, so the rest of the pipeline (contacts, smoothing) is unchanged.
-    if config["models"].get("pose_backend", "yolov8") == "mediapipe":
+    backend = config["models"].get("pose_backend", "yolov8")
+    if backend == "mediapipe":
         import pose_mediapipe as pose_src
         pose_model = pose_src.load_pose_model(config["models"].get("pose_landmarker_task", "pose_landmarker.task"))
-        print("     pose backend: mediapipe")
+    elif backend == "rtmpose":
+        import pose_rtmpose as pose_src
+        pose_model = pose_src.load_pose_model(config["models"].get("rtmpose_mode", "balanced"))
     else:
         pose_src = pose_estimator
         pose_model = pose_src.load_pose_model(config["models"]["pose_estimator"])
+    print(f"     pose backend: {backend}")
     det = config["detection"]
     pose_cfg = config["pose"]
     reach = pose_cfg.get("reach_frac", 0.33)

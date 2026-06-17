@@ -11,9 +11,11 @@ models:
   # Once you fine-tune on holds, point this at models/holds_yolov8n.pt.
   hold_detector: "best.pt"
 
-  # Pose backend: "yolov8" (yolov8*-pose.pt) or "mediapipe" (per-joint visibility
-  # + 3D world landmarks). Switch to A/B them on the same clip.
-  pose_backend: "yolov8"
+  # Pose backend: "rtmpose" (top-down, best for small/odd-posed climbers),
+  # "yolov8" (yolov8*-pose.pt), or "mediapipe" (visibility + 3D, but misses small
+  # climbers). rtmpose won the A/B on the szpagat clip — see docs / PROJECT_PLAN.
+  pose_backend: "rtmpose"
+  rtmpose_mode: "balanced"                # lightweight | balanced | performance
   pose_estimator: "yolov8n-pose.pt"       # used when pose_backend == yolov8
   pose_landmarker_task: "pose_landmarker.task"  # used when pose_backend == mediapipe
 

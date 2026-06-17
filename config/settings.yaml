@@ -11,9 +11,11 @@ models:
   # Once you fine-tune on holds, point this at models/holds_yolov8n.pt.
   hold_detector: "best.pt"
 
-  # Pose model used by pose_estimator.py (Phase 3). yolov8x-pose is the most
-  # accurate; yolov8n-pose is much faster — required here since there's no GPU.
-  pose_estimator: "yolov8n-pose.pt"
+  # Pose backend: "yolov8" (yolov8*-pose.pt) or "mediapipe" (per-joint visibility
+  # + 3D world landmarks). Switch to A/B them on the same clip.
+  pose_backend: "yolov8"
+  pose_estimator: "yolov8n-pose.pt"       # used when pose_backend == yolov8
+  pose_landmarker_task: "pose_landmarker.task"  # used when pose_backend == mediapipe
 
 # ---------------------------------------------------------------------------
 # Inference thresholds

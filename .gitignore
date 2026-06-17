@@ -51,3 +51,6 @@ htmlcov/
 # --- Secrets / local config ---
 .env
 *.local.yaml
+
+# mediapipe task models
+models/*.task

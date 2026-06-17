@@ -209,7 +209,15 @@ def analyze_video(
     import pose_estimator
 
     detector = hold_detector.load_detector(config["models"]["hold_detector"])
-    pose_model = pose_estimator.load_pose_model(config["models"]["pose_estimator"])
+    # Pick the pose backend; both expose load_pose_model / estimate_pose and return
+    # FramePoses, so the rest of the pipeline (contacts, smoothing) is unchanged.
+    if config["models"].get("pose_backend", "yolov8") == "mediapipe":
+        import pose_mediapipe as pose_src
+        pose_model = pose_src.load_pose_model(config["models"].get("pose_landmarker_task", "pose_landmarker.task"))
+        print("     pose backend: mediapipe")
+    else:
+        pose_src = pose_estimator
+        pose_model = pose_src.load_pose_model(config["models"]["pose_estimator"])
     det = config["detection"]
     pose_cfg = config["pose"]
     reach = pose_cfg.get("reach_frac", 0.33)
@@ -253,7 +261,7 @@ def analyze_video(
                 hold_boxes = detect_at(frame)
             elif stabilizer is not None:
                 hold_boxes = stabilizer.warp_boxes(ref_boxes, frame)
-            poses = pose_estimator.estimate_pose(pose_model, frame, pose_cfg["confidence"])
+            poses = pose_src.estimate_pose(pose_model, frame, pose_cfg["confidence"])
             per_frame.append({
                 "index": frame_index,
                 "boxes": list(hold_boxes),

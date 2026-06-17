@@ -63,21 +63,31 @@ arrived and is wired (`models.hold_detector: best.pt`) — detection works well.
   relative); homography rectification for angled walls (`--corners`). See
   `docs/annotation-retrain.md` for the planned richer-class detector retrain.
 - **Phase 3 (video: pose + contacts + beta):** WORKING on real footage.
-  `python -m src.video_pipeline <vid> --out out.mp4`. Pose via **RTMPose** (default,
-  top-down, best for small/odd-posed climbers — beat yolov8 & MediaPipe in an A/B);
-  switch with `models.pose_backend`. Contacts: extremity points + velocity gate +
-  sticky resolution + occlusion/implausible-keypoint detection + mode filter.
-  Outputs: annotated video, contact summary, and a **move sequence ("beta")**.
-  Extras: `--route-color` (analyze one route), `--stabilize` (handheld).
+  `python -m src.video_pipeline <vid> --out out.mp4`. Pose via **RTMPose Wholebody**
+  (133-kpt; `models.rtmpose_wholebody: true`) — uses real big-toe / fingertip
+  **contact points** instead of extrapolating from ankle/wrist; keeps the 17 body
+  joints for the skeleton, ignores face. RTMPose beat yolov8 & MediaPipe in a
+  **quantitative A/B** (`scripts/ab_pose_backends.py`: contact-joint PCK 85% vs 69%).
+  Contacts: per-limb point + velocity gate + engage dwell + sticky resolution +
+  occlusion detection + mode filter. **Contact distances are scale-invariant** —
+  expressed as a fraction of torso size (`*_frac` in config), so behaviour is the
+  same at any resolution / climber size. Overlay: thin skeleton, small body dots,
+  hand = 3 finger rings, foot = heel+toe dots. Outputs: annotated video, contact
+  summary, **move sequence ("beta")**. Extras: `--route-color`, `--stabilize`.
 
 ### Pending / next
-1. **Richer-class detector retrain** — user shooting ~50–100 more gym photos
-   (~2026-06-18). Workflow: `scripts/export_for_annotation.py` → correct in
-   Roboflow (volume/downclimb/marker classes) → fine-tune. See `docs/annotation-retrain.md`.
-2. **Climbing-fine-tuned POSE model** — the deeper accuracy fix for extreme poses
-   (RTMPose got us most of the way; off-the-shelf 2D pose can't fully nail a wide
-   split). Needs keypoint annotation on climbing frames.
-3. **Phase 4 (force estimation)** — deferred; now has pose+contacts timeline as input.
+1. **Richer-class detector retrain — TOP PRIORITY (next session).** Holds vs
+   volumes/markers/downclimb/tape are the current limiter (on slabs everything
+   snapped to one box). User shooting ~50–100 gym photos 2026-06-18. Workflow:
+   `scripts/export_for_annotation.py` → correct in Roboflow → fine-tune.
+   See `docs/annotation-retrain.md`.
+2. **POSE: evaluate Wholebody off-the-shelf, fine-tune only if needed.** The
+   pretrained 133-kpt model now gives toe/finger points (no training). Eval harness:
+   `scripts/eval_pose.py` (PCK vs hand-corrected GT); annotation bootstrap via
+   `scripts/export_pose_frames.py` + `pack_cvat_dataset.py` + `cvat_skeleton_label.py`
+   (CVAT). If a custom model is needed, use a lean ~23-kpt schema (no face),
+   likely yolov8-pose (easy custom kpts + mobile export).
+3. **Phase 4 (force estimation)** — deferred; has pose+contacts timeline as input.
 
 ### Environment notes
 - No local GPU. `.venv` (Python 3.14): torch+ultralytics, rtmlib+onnxruntime, mediapipe.

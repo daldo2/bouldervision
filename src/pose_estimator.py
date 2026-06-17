@@ -51,12 +51,24 @@ LIMB_JOINTS = {
     "right_foot": (14, 16), # right_knee  -> right_ankle
 }
 
+# COCO-17 skeleton edges (0-indexed joint pairs) for drawing the stick figure.
+SKELETON_EDGES = [
+    (0, 1), (0, 2), (1, 3), (2, 4),                  # nose-eyes-ears
+    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),         # shoulders + arms
+    (5, 11), (6, 12), (11, 12),                      # torso
+    (11, 13), (13, 15), (12, 14), (14, 16),          # legs
+]
+
 
 @dataclass
 class FramePose:
     """Keypoints for one person in one frame."""
     # keypoints[i] = (x, y, confidence) for COCO joint i.
     keypoints: np.ndarray  # shape (17, 3)
+    # Optional precise contact points {limb: (x, y, conf)} from a whole-body model
+    # (real big-toe / fingertips). When present and confident, limb_points uses
+    # these instead of extrapolating from the wrist/ankle. None => extrapolate.
+    contact_pts: Optional[Dict[str, Tuple[float, float, float]]] = None
 
     def limb_point(self, limb: str) -> Optional[Tuple[float, float, float]]:
         """Return (x, y, conf) for a named contact limb, or None if unknown."""
@@ -90,6 +102,28 @@ def estimate_pose(model, image: np.ndarray, confidence: float) -> List[FramePose
     for person in result.keypoints.data:
         poses.append(FramePose(keypoints=person.cpu().numpy()))
     return poses
+
+
+def body_scale(keypoints: np.ndarray, min_conf: float = 0.2) -> Optional[float]:
+    """A body-size reference in pixels, for scale-invariant contact thresholds.
+
+    Returns the mid-shoulder→mid-hip (torso) distance when shoulders+hips are
+    confidently seen — a stable proxy for how big the climber appears, independent
+    of video resolution or distance. Falls back to ~1.5× shoulder width, else None.
+    Expressing touch/release distances as a FRACTION of this means a threshold
+    catches the same way whether the climber is 74px or 740px tall on screen.
+    """
+    sh = keypoints[[5, 6]]
+    hp = keypoints[[11, 12]]
+    if (sh[:, 2] > min_conf).all() and (hp[:, 2] > min_conf).all():
+        d = math.hypot(*(sh[:, :2].mean(0) - hp[:, :2].mean(0)))
+        if d > 1:
+            return float(d)
+    if (sh[:, 2] > min_conf).all():
+        w = math.hypot(*(sh[0, :2] - sh[1, :2]))
+        if w > 1:
+            return float(w) * 1.5
+    return None
 
 
 def point_to_box_distance(x: float, y: float, box: Tuple[int, int, int, int]) -> float:
@@ -156,13 +190,29 @@ def extremity_point(
 
 
 def limb_points(
-    pose: FramePose, reach_frac: float = 0.33, min_joint_conf: float = 0.3
+    pose: FramePose, reach_frac: float = 0.33,
+    reach_frac_foot: Optional[float] = None, min_joint_conf: float = 0.3
 ) -> Dict[str, Tuple[float, float, float]]:
-    """Extremity contact points for all four contact limbs of one pose."""
-    return {
-        limb: extremity_point(pose.keypoints, limb, reach_frac, min_joint_conf)
-        for limb in CONTACT_LIMBS
-    }
+    """Extremity contact points for all four contact limbs of one pose.
+
+    Hands and feet use different extrapolation: a hand reaches well past the wrist
+    (fingers on the hold), so `reach_frac` ~0.33 is right. But a foot's contact is
+    essentially at the ankle — extrapolating along the shin (knee->ankle) overshoots
+    *below* where the shoe meets the wall — so feet use the smaller `reach_frac_foot`
+    (defaults to `reach_frac` for backward compatibility when not given).
+    """
+    foot_reach = reach_frac if reach_frac_foot is None else reach_frac_foot
+    out: Dict[str, Tuple[float, float, float]] = {}
+    for limb in CONTACT_LIMBS:
+        # Prefer a real whole-body contact point (big toe / fingertips) when it's
+        # confident; otherwise fall back to extrapolating from wrist/ankle.
+        cp = pose.contact_pts.get(limb) if pose.contact_pts else None
+        if cp is not None and cp[2] >= min_joint_conf:
+            out[limb] = cp
+            continue
+        r = foot_reach if limb.endswith("_foot") else reach_frac
+        out[limb] = extremity_point(pose.keypoints, limb, r, min_joint_conf)
+    return out
 
 
 def nearest_hold_index(
@@ -248,7 +298,7 @@ def flag_implausible_keypoints(
                 if cur[idx][2] > 0 and prev[idx][2] > 0 and \
                         math.hypot(cur[idx][0] - prev[idx][0], cur[idx][1] - prev[idx][1]) > jump_px:
                     cur[idx][2] = 0.0
-    return [FramePose(keypoints=k) for k in seq]
+    return [FramePose(keypoints=k, contact_pts=p.contact_pts) for k, p in zip(seq, poses)]
 
 
 def enforce_lr_consistency(poses: List[FramePose], min_conf: float = 0.3) -> List[FramePose]:
@@ -280,7 +330,7 @@ def enforce_lr_consistency(poses: List[FramePose], min_conf: float = 0.3) -> Lis
             if swapped < same:
                 cur[[lt, rt]] = cur[[rt, lt]]
                 cur[[lb, rb]] = cur[[rb, lb]]
-    return [FramePose(keypoints=k) for k in seq]
+    return [FramePose(keypoints=k, contact_pts=p.contact_pts) for k, p in zip(seq, poses)]
 
 
 def resolve_contact_sequence(
@@ -290,13 +340,17 @@ def resolve_contact_sequence(
     release_distance_px: float,
     max_speed_px: float,
     min_confidence: float,
+    engage_min_frames: int = 1,
 ) -> List[Dict[str, Optional[int]]]:
     """Stateful "sticky" contact resolution over a whole clip.
 
     Models how a limb actually uses a hold:
       - ENGAGE: a limb grabs the nearest hold only when it settles there — within
-        `touch_distance_px` AND moving slower than `max_speed_px` (so reaching
-        *past* a hold doesn't count).
+        `touch_distance_px`, moving slower than `max_speed_px`, AND it has stayed
+        that way on the SAME hold for `engage_min_frames` consecutive frames. The
+        dwell requirement stops an eager grip from latching the instant a hand
+        passes near a hold; it must actually come to rest there. (1 = engage
+        immediately, the original behavior.)
       - STAY (sticky): once gripping a hold it keeps gripping while it stays
         within `release_distance_px` of THAT hold, regardless of speed — so a
         foot adjusting on a hold (a brief fast wiggle) isn't dropped. It releases
@@ -311,6 +365,8 @@ def resolve_contact_sequence(
     Returns a per-frame {limb: hold_index or None}.
     """
     state: Dict[str, Optional[int]] = {limb: None for limb in CONTACT_LIMBS}
+    # (candidate hold, consecutive qualifying frames) per limb, for the engage dwell.
+    pending: Dict[str, Tuple[Optional[int], int]] = {limb: (None, 0) for limb in CONTACT_LIMBS}
     prev: Optional[Dict[str, Tuple[float, float, float]]] = None
     out: List[Dict[str, Optional[int]]] = []
 
@@ -318,6 +374,7 @@ def resolve_contact_sequence(
         frame: Dict[str, Optional[int]] = {limb: None for limb in CONTACT_LIMBS}
         if pts is None:
             out.append(frame)   # keep `state` so a brief gap doesn't release
+            pending = {limb: (None, 0) for limb in CONTACT_LIMBS}  # must re-settle after a gap
             prev = None
             continue
         for limb in CONTACT_LIMBS:
@@ -325,17 +382,27 @@ def resolve_contact_sequence(
             cur = state[limb]
             if c < min_confidence:
                 frame[limb] = cur  # can't see it this frame; assume unchanged
+                pending[limb] = (None, 0)
                 continue
             if cur is not None and cur < len(boxes) and \
                     point_to_box_distance(x, y, boxes[cur]) <= release_distance_px:
                 frame[limb] = cur  # sticky: still on the gripped hold
+                pending[limb] = (None, 0)
                 continue
             idx = nearest_hold_index(x, y, boxes, touch_distance_px)
             speed = math.hypot(x - prev[limb][0], y - prev[limb][1]) if prev and prev.get(limb) else 0.0
             if idx is not None and speed <= max_speed_px:
-                state[limb] = idx
-                frame[limb] = idx
+                # Near and settled — count consecutive frames on this same hold.
+                run = pending[limb][1] + 1 if pending[limb][0] == idx else 1
+                pending[limb] = (idx, run)
+                if run >= engage_min_frames:
+                    state[limb] = idx
+                    frame[limb] = idx
+                else:
+                    state[limb] = None
+                    frame[limb] = None  # candidate, not yet committed
             else:
+                pending[limb] = (None, 0)
                 state[limb] = None
                 frame[limb] = None
         out.append(frame)
@@ -434,4 +501,6 @@ def smooth_keypoint_sequence(poses: List[FramePose], window: int = 5) -> List[Fr
         out[t, :, :2] = (seg[:, :, :2] * weights).sum(axis=0) / weights.sum(axis=0)
         out[t, :, 2] = seg[:, :, 2].mean(axis=0)
 
-    return [FramePose(keypoints=out[t]) for t in range(n_frames)]
+    # Carry the precise contact points through unchanged (they live outside the
+    # 17-joint array, so the moving average doesn't touch them).
+    return [FramePose(keypoints=out[t], contact_pts=poses[t].contact_pts) for t in range(n_frames)]

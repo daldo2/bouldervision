@@ -11,13 +11,14 @@ models:
   # Once you fine-tune on holds, point this at models/holds_yolov8n.pt.
   hold_detector: "best.pt"
 
-  # Pose backend: "rtmpose" (top-down, best for small/odd-posed climbers),
-  # "yolov8" (yolov8*-pose.pt), or "mediapipe" (visibility + 3D, but misses small
-  # climbers). rtmpose won the A/B on the szpagat clip — see docs / PROJECT_PLAN.
+  # Pose backend: RTMPose (top-down). It won both the visual and the quantitative
+  # A/B (contact-joint PCK 85% vs yolov8 69%) — see scripts/ab_pose_backends.py.
+  # yolov8 / mediapipe backends were dropped; their code paths still exist behind
+  # the switch, but we no longer carry their config here.
   pose_backend: "rtmpose"
   rtmpose_mode: "balanced"                # lightweight | balanced | performance
-  pose_estimator: "yolov8n-pose.pt"       # used when pose_backend == yolov8
-  pose_landmarker_task: "pose_landmarker.task"  # used when pose_backend == mediapipe
+  rtmpose_wholebody: true                 # 133-kpt model: real foot (toe/heel) + hand (finger)
+                                          # contact points instead of extrapolating from ankle/wrist
 
 # ---------------------------------------------------------------------------
 # Inference thresholds
@@ -29,10 +30,19 @@ detection:
 
 pose:
   confidence: 0.50          # minimum keypoint confidence to trust a joint
-  touch_distance_px: 40     # hand/foot within this many px of a hold = candidate contact
-  reach_frac: 0.33          # extrapolate past wrist/ankle toward the hand/foot by this fraction
-  contact_max_speed_px: 12  # a limb moving faster than this (px/frame) is reaching, not gripping (engage only)
-  release_distance_px: 70   # once gripping, stay until the limb leaves the hold by this much (sticky)
+  # Contact distances are SCALE-INVARIANT: expressed as a fraction of the climber's
+  # torso length (mid-shoulder→mid-hip), measured once per clip. effective_px =
+  # frac * torso_px, so the same frac catches identically at any resolution / climber
+  # size in frame. The *_px values below are only a fallback when no pose scale exists.
+  touch_distance_frac: 0.10    # toe/finger within this fraction of torso of a hold = candidate contact
+  release_distance_frac: 0.18  # once gripping, stay until the limb leaves the hold by this fraction (sticky)
+  contact_max_speed_frac: 0.16 # faster than this fraction of torso per frame = reaching, not gripping (engage only)
+  reach_frac: 0.33          # HANDS: extrapolate past the wrist toward the fingers (only when no wholebody finger point)
+  reach_frac_foot: 0.10     # FEET: small extrapolation past the ankle (only when no wholebody toe point)
+  engage_min_frames: 3      # must stay near+slow on the SAME hold this many frames before it counts as gripped (1 = instant)
+  touch_distance_px: 12     # fallback (px) when no body scale is available
+  contact_max_speed_px: 12  # fallback (px/frame) when no body scale is available
+  release_distance_px: 20   # fallback (px) when no body scale is available
   primary_min_seconds: 1.0  # a hold held >= this long counts as a real "route hold" in the summary
   smooth_window: 5          # temporal keypoint smoothing window (odd; 1 = off) — steadies jitter
   contact_gap_frames: 8     # bridge contact dropouts up to this many frames (a brief blip, not a release)

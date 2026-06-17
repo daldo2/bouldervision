@@ -27,6 +27,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import utils  # noqa: E402
+import pose_estimator  # noqa: E402  (pure: numpy only, no torch — safe at import time)
 
 
 @dataclass
@@ -211,21 +212,23 @@ def analyze_video(
     detector = hold_detector.load_detector(config["models"]["hold_detector"])
     # Pick the pose backend; both expose load_pose_model / estimate_pose and return
     # FramePoses, so the rest of the pipeline (contacts, smoothing) is unchanged.
-    backend = config["models"].get("pose_backend", "yolov8")
+    backend = config["models"].get("pose_backend", "rtmpose")
     if backend == "mediapipe":
         import pose_mediapipe as pose_src
         pose_model = pose_src.load_pose_model(config["models"].get("pose_landmarker_task", "pose_landmarker.task"))
     elif backend == "rtmpose":
         import pose_rtmpose as pose_src
-        pose_model = pose_src.load_pose_model(config["models"].get("rtmpose_mode", "balanced"))
+        pose_model = pose_src.load_pose_model(
+            config["models"].get("rtmpose_mode", "balanced"),
+            wholebody=config["models"].get("rtmpose_wholebody", False))
     else:
         pose_src = pose_estimator
-        pose_model = pose_src.load_pose_model(config["models"]["pose_estimator"])
+        pose_model = pose_src.load_pose_model(config["models"].get("pose_estimator", "yolov8n-pose.pt"))
     print(f"     pose backend: {backend}")
     det = config["detection"]
     pose_cfg = config["pose"]
     reach = pose_cfg.get("reach_frac", 0.33)
-    max_speed = pose_cfg.get("contact_max_speed_px", 12)
+    reach_foot = pose_cfg.get("reach_frac_foot", reach)
 
     def detect_at(frame) -> List[tuple]:
         boxes = hold_detector.detect_holds(
@@ -294,7 +297,9 @@ def analyze_video(
     window = pose_cfg.get("smooth_window", 1)
     if window and window > 1 and per_frame:
         blank = np.zeros((17, 3), dtype=float)
-        stacked = [pose_estimator.FramePose(m["pose"].keypoints if m["pose"] is not None else blank)
+        stacked = [pose_estimator.FramePose(
+                       m["pose"].keypoints if m["pose"] is not None else blank,
+                       contact_pts=m["pose"].contact_pts if m["pose"] is not None else None)
                    for m in per_frame]
         smoothed = pose_estimator.smooth_keypoint_sequence(stacked, window)
         for m, sp in zip(per_frame, smoothed):
@@ -303,16 +308,34 @@ def analyze_video(
 
     # Extremity (hand/foot) points per frame.
     points_per_frame: List[Optional[dict]] = [
-        pose_estimator.limb_points(m["pose"], reach) if m["pose"] is not None else None
+        pose_estimator.limb_points(m["pose"], reach, reach_foot) if m["pose"] is not None else None
         for m in per_frame
     ]
     boxes_per_frame = [m["boxes"] for m in per_frame]
 
+    # Scale-invariant contact thresholds: a fraction of the climber's torso size
+    # (median over the clip), so the same config catches identically at any video
+    # resolution / climber size. Falls back to absolute px if no pose scale exists.
+    scales = [s for s in (pose_estimator.body_scale(m["pose"].keypoints)
+                          for m in per_frame if m["pose"] is not None) if s]
+    clip_scale = float(np.median(scales)) if scales else None
+    if clip_scale:
+        touch_px = pose_cfg.get("touch_distance_frac", 0.14) * clip_scale
+        release_px = pose_cfg.get("release_distance_frac", 0.24) * clip_scale
+        speed_px = pose_cfg.get("contact_max_speed_frac", 0.16) * clip_scale
+        print(f"     body scale: torso≈{clip_scale:.0f}px -> touch={touch_px:.0f} "
+              f"release={release_px:.0f} maxspeed={speed_px:.0f}px")
+    else:
+        touch_px = pose_cfg["touch_distance_px"]
+        release_px = pose_cfg.get("release_distance_px", 70)
+        speed_px = pose_cfg.get("contact_max_speed_px", 12)
+        print("     body scale: none — using px fallbacks")
+
     # Sticky, stateful contact resolution (engage when settled, stay while near).
     raw_contacts = pose_estimator.resolve_contact_sequence(
         points_per_frame, boxes_per_frame,
-        pose_cfg["touch_distance_px"], pose_cfg.get("release_distance_px", 70),
-        max_speed, pose_cfg["confidence"],
+        touch_px, release_px, speed_px, pose_cfg["confidence"],
+        pose_cfg.get("engage_min_frames", 1),
     )
 
     # Per-limb cleanup: majority-vote the hold over a window (kills adjacent-hold
@@ -443,25 +466,47 @@ def _filter_by_color(frame, boxes, color, config, include_volumes=True):
 
 
 def _draw_frame(frame, hold_boxes, poses, contacts, points=None) -> None:
-    """Overlay holds (touched ones highlighted), keypoints, and contacts in place."""
+    """Overlay holds (touched ones highlighted), the skeleton, and contacts in place."""
     touched = {idx for idx in contacts.values() if idx is not None}
     for i, (x1, y1, x2, y2) in enumerate(hold_boxes):
+        # All boxes thin (1px); touched vs untouched read by colour, not weight.
         color = (0, 255, 0) if i in touched else (160, 160, 160)
-        thickness = 2 if i in touched else 1   # thin borders; big boxes looked heavy at 3
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1, cv2.LINE_AA)
 
     for pose in poses:
-        for x, y, conf in pose.keypoints:
+        kp = pose.keypoints
+        # Thin "sticks" between joints, drawn under the keypoint dots.
+        for a, b in pose_estimator.SKELETON_EDGES:
+            if kp[a][2] > 0 and kp[b][2] > 0:
+                cv2.line(frame, (int(kp[a][0]), int(kp[a][1])),
+                         (int(kp[b][0]), int(kp[b][1])), (150, 150, 150), 1, cv2.LINE_AA)
+        for x, y, conf in kp:
             if conf > 0:
-                cv2.circle(frame, (int(x), int(y)), 3, (0, 200, 255), -1)
+                cv2.circle(frame, (int(x), int(y)), 1, (0, 200, 255), -1, cv2.LINE_AA)
 
-    # The estimated hand/foot contact points: green when gripping, red otherwise.
-    if points:
+    # Contact markers: green when that limb is gripping, red otherwise.
+    disp = next((p.contact_pts["_display"] for p in poses
+                 if p.contact_pts and "_display" in p.contact_pts), None)
+    if disp is not None:
+        # Whole-body contact AREA: hands as small THIN RINGS (3 fingertips sit close
+        # together so filled dots merged into a blob), feet as small filled dots.
+        for limb, pts in disp.items():
+            col = (0, 255, 0) if contacts.get(limb) is not None else (0, 0, 255)
+            ring = "hand" in limb
+            for x, y, c in pts:
+                if c <= 0:
+                    continue
+                if ring:
+                    cv2.circle(frame, (int(x), int(y)), 3, col, 1, cv2.LINE_AA)
+                else:
+                    cv2.circle(frame, (int(x), int(y)), 2, col, -1, cv2.LINE_AA)
+    elif points:
+        # No whole-body points: fall back to one circle at the extrapolated point.
         for limb, (x, y, c) in points.items():
             if c <= 0:
                 continue
-            gripping = contacts.get(limb) is not None
-            cv2.circle(frame, (int(x), int(y)), 7, (0, 255, 0) if gripping else (0, 0, 255), 2)
+            col = (0, 255, 0) if contacts.get(limb) is not None else (0, 0, 255)
+            cv2.circle(frame, (int(x), int(y)), 5, col, 1, cv2.LINE_AA)
 
 
 if __name__ == "__main__":

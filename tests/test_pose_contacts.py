@@ -100,6 +100,20 @@ def test_smooth_drops_flicker_runs():
     assert pe.smooth_contact_sequence(seq, max_gap=8, min_run=2) == [None, None, None, None, None]
 
 
+def test_mode_smooth_locks_to_dominant_hold():
+    # Foot mostly on 29 with jitter to 23 -> majority vote pins it to 29.
+    seq = [29, 29, 23, 29, 23, 29, 29, 23, 29]
+    out = pe.mode_smooth_contacts(seq, window=5)
+    assert out == [29] * 9
+
+
+def test_mode_smooth_keeps_a_real_switch():
+    # A genuine, sustained switch from 1 to 2 survives the mode filter.
+    seq = [1] * 6 + [2] * 6
+    out = pe.mode_smooth_contacts(seq, window=5)
+    assert out[0] == 1 and out[-1] == 2 and set(out) == {1, 2}
+
+
 # --- sticky (stateful) contact resolution -----------------------------------
 def _foot(x, y, c=0.9):
     return {"left_foot": (x, y, c), "left_hand": (0, 0, 0), "right_hand": (0, 0, 0),

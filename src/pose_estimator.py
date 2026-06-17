@@ -299,6 +299,25 @@ def resolve_contact_sequence(
     return out
 
 
+def mode_smooth_contacts(seq: List[Optional[int]], window: int) -> List[Optional[int]]:
+    """Replace each frame's hold with the most common value in a window around it.
+
+    Kills oscillation between two adjacent holds (a foot jittering #23<->#29):
+    whichever hold the limb is actually on dominates the local window and wins,
+    so the assignment stays put instead of flickering. `window` should span ~the
+    minimum real dwell (e.g. 0.5 s) so genuine moves still come through.
+    """
+    if window <= 1 or len(seq) <= 1:
+        return list(seq)
+    from collections import Counter
+    n, half = len(seq), window // 2
+    out = list(seq)
+    for t in range(n):
+        lo, hi = max(0, t - half), min(n, t + half + 1)
+        out[t] = Counter(seq[lo:hi]).most_common(1)[0][0]
+    return out
+
+
 def smooth_contact_sequence(
     seq: List[Optional[int]], max_gap: int = 8, min_run: int = 2
 ) -> List[Optional[int]]:

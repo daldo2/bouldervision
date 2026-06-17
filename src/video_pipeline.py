@@ -244,12 +244,10 @@ def analyze_video(
     finally:
         cap.release()
 
-    # Fix left/right limb-label swaps before anything else uses the keypoints.
-    present = [m for m in per_frame if m["pose"] is not None]
-    if len(present) > 1:
-        fixed = pose_estimator.enforce_lr_consistency([m["pose"] for m in present])
-        for m, fp in zip(present, fixed):
-            m["pose"] = fp
+    # NOTE: greedy left/right re-labeling (enforce_lr_consistency) was tried here
+    # but it corrupts the stable foot when ONE ankle keypoint collapses onto the
+    # other (not a clean swap). The per-limb mode filter below handles the
+    # resulting oscillation more robustly, so we don't re-label.
 
     # Temporal keypoint smoothing (steadies jitter, e.g. during a wide split).
     window = pose_cfg.get("smooth_window", 1)
@@ -276,14 +274,17 @@ def analyze_video(
         max_speed, pose_cfg["confidence"],
     )
 
-    # Light hysteresis cleanup: bridge any residual dropouts, drop 1-frame flicker.
+    # Per-limb cleanup: majority-vote the hold over a window (kills adjacent-hold
+    # oscillation from a jittery keypoint), then bridge dropouts / drop flicker.
     gap = pose_cfg.get("contact_gap_frames", 8)
     min_run = pose_cfg.get("contact_min_run", 2)
+    mode_win = max(1, round(pose_cfg.get("hold_mode_seconds", 0.5) * fps))
     contacts_seq = [dict(c) for c in raw_contacts]
     for limb in pose_estimator.CONTACT_LIMBS:
-        cleaned = pose_estimator.smooth_contact_sequence(
-            [c[limb] for c in raw_contacts], gap, min_run)
-        for t, v in enumerate(cleaned):
+        seq = [c[limb] for c in raw_contacts]
+        seq = pose_estimator.mode_smooth_contacts(seq, mode_win)
+        seq = pose_estimator.smooth_contact_sequence(seq, gap, min_run)
+        for t, v in enumerate(seq):
             contacts_seq[t][limb] = v
 
     timeline = [FrameAnalysis(frame_index=m["index"], contacts=contacts_seq[t])

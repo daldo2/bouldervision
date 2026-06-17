@@ -33,6 +33,7 @@ pose:
   smooth_window: 5          # temporal keypoint smoothing window (odd; 1 = off) — steadies jitter
   contact_gap_frames: 8     # bridge contact dropouts up to this many frames (a brief blip, not a release)
   contact_min_run: 2        # drop contacts shorter than this many frames (flicker / near-pass)
+  hold_mode_seconds: 0.5    # majority-vote each limb's hold over this window — kills adjacent-hold oscillation
 
 # ---------------------------------------------------------------------------
 # Detection post-processing — sort raw detections into holds vs. wall furniture

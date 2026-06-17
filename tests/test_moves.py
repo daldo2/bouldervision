@@ -26,6 +26,11 @@ def hold(**kw):
     return base
 
 
+def tlp(rows):
+    """Timeline from (contacts, points) rows."""
+    return [vp.FrameAnalysis(frame_index=i, contacts=c, points=p) for i, (c, p) in enumerate(rows)]
+
+
 def test_first_grip_is_a_start_move():
     timeline = tl([hold(left_hand=5)] * 6)
     moves = vp.extract_moves(timeline, fps=30, min_hold_frames=3)
@@ -52,6 +57,24 @@ def test_brief_touch_below_threshold_is_ignored():
     timeline = tl([hold(left_hand=5)] * 5 + [hold(left_hand=8)] * 2 + [hold(left_hand=5)] * 5)
     moves = vp.extract_moves(timeline, fps=30, min_hold_frames=3)
     assert [(m.limb, m.hold) for m in moves] == [("left_hand", 5)]
+
+
+def test_stationary_hold_flip_is_not_a_move():
+    # Right hand sits at ~(200,200), nearest-hold oscillates 0<->2 but it never
+    # travels -> no phantom moves beyond the initial settle.
+    pt = {"right_hand": (200, 200, 0.9)}
+    rows = ([(hold(right_hand=0), pt)] * 5 + [(hold(right_hand=2), pt)] * 5
+            + [(hold(right_hand=0), pt)] * 5)
+    moves = vp.extract_moves(tlp(rows), fps=30, min_hold_frames=3, min_move_px=45)
+    assert [(m.hold, m.start) for m in moves] == [(0, True)]  # only the start
+
+
+def test_real_travel_counts_as_a_move():
+    # Hand actually moves ~150px to a new hold -> a move.
+    rows = ([(hold(right_hand=0), {"right_hand": (200, 200, 0.9)})] * 5
+            + [(hold(right_hand=2), {"right_hand": (350, 200, 0.9)})] * 5)
+    moves = vp.extract_moves(tlp(rows), fps=30, min_hold_frames=3, min_move_px=45)
+    assert [(m.hold, m.start) for m in moves] == [(0, True), (2, False)]
 
 
 def test_moves_are_time_ordered_across_limbs():

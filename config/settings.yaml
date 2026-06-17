@@ -34,6 +34,7 @@ pose:
   contact_gap_frames: 8     # bridge contact dropouts up to this many frames (a brief blip, not a release)
   contact_min_run: 2        # drop contacts shorter than this many frames (flicker / near-pass)
   hold_mode_seconds: 0.5    # majority-vote each limb's hold over this window — kills adjacent-hold oscillation
+  move_min_displacement_px: 45  # a move only counts if the limb travelled this far (else it's a re-assignment)
 
 # ---------------------------------------------------------------------------
 # Detection post-processing — sort raw detections into holds vs. wall furniture

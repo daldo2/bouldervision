@@ -35,6 +35,8 @@ class FrameAnalysis:
     frame_index: int
     # limb -> hold index being touched (or None). Populated in Phase 3.
     contacts: Dict[str, Optional[int]] = field(default_factory=dict)
+    # limb -> (x, y, conf) extremity point, for move-displacement checks.
+    points: Dict[str, tuple] = field(default_factory=dict)
 
 
 def summarize_contacts(timeline: List["FrameAnalysis"]) -> Dict[str, Counter]:
@@ -79,21 +81,29 @@ class Move:
 
 
 def extract_moves(timeline: List["FrameAnalysis"], fps: float = 30.0,
-                  min_hold_frames: int = 5) -> List["Move"]:
+                  min_hold_frames: int = 5, min_move_px: float = 45.0) -> List["Move"]:
     """Turn a per-frame contact timeline into an ordered move sequence ("beta").
 
     A move is recorded when a limb settles on a hold *different* from the one it
-    last held — i.e. it grabbed something new. A limb releasing (going to None)
-    does NOT reset its memory, so letting go and re-gripping the SAME hold is not
-    counted as a move. To avoid logging a hold the climber only brushed, a new
-    hold must be held for at least `min_hold_frames` frames to count.
+    last held — i.e. it grabbed something new. Guards against false moves:
+
+      - releasing (going to None) does NOT reset a limb's memory, so letting go
+        and re-gripping the SAME hold is not a move;
+      - a new hold must be held for at least `min_hold_frames` (ignore brushes);
+      - the limb must actually have TRAVELLED at least `min_move_px` since it
+        settled on its previous hold. A stationary limb whose nearest-hold merely
+        flips between two adjacent holds (#0<->#2) hasn't moved, so it is adopted
+        silently without logging a phantom move. (Needs per-frame `points`; with
+        no positions the displacement guard is skipped.)
 
     The first time each limb settles is flagged `start` (the starting position).
     Returns moves ordered by time.
     """
-    # How long each (limb, hold) contact run lasts, so we can ignore brief ones.
+    import math
     moves: List[Move] = []
-    last_hold = {limb: None for limb in ("left_hand", "right_hand", "left_foot", "right_foot")}
+    limbs = ("left_hand", "right_hand", "left_foot", "right_foot")
+    last_hold = {limb: None for limb in limbs}
+    settle_pos = {limb: None for limb in limbs}  # where the limb settled on last_hold
     started = set()
     n = len(timeline)
 
@@ -105,12 +115,22 @@ def extract_moves(timeline: List["FrameAnalysis"], fps: float = 30.0,
 
     order = 0
     for t, frame in enumerate(timeline):
-        for limb in last_hold:
+        for limb in limbs:
             hold = frame.contacts.get(limb)
             if hold is None or hold == last_hold[limb]:
                 continue
             if run_length(t, limb, hold) < min_hold_frames:
                 continue  # too brief — a brush, not a move
+            pos = frame.points.get(limb)
+            travelled = None
+            if pos is not None and settle_pos[limb] is not None:
+                travelled = math.hypot(pos[0] - settle_pos[limb][0], pos[1] - settle_pos[limb][1])
+            # Stationary re-assignment between adjacent holds: adopt, don't log.
+            if travelled is not None and travelled < min_move_px:
+                last_hold[limb] = hold
+                if pos is not None:
+                    settle_pos[limb] = pos
+                continue
             order += 1
             is_start = limb not in started
             started.add(limb)
@@ -118,6 +138,8 @@ def extract_moves(timeline: List["FrameAnalysis"], fps: float = 30.0,
                               time_s=frame.frame_index / fps, limb=limb,
                               hold=hold, start=is_start))
             last_hold[limb] = hold
+            if pos is not None:
+                settle_pos[limb] = pos
     return moves
 
 
@@ -287,7 +309,8 @@ def analyze_video(
         for t, v in enumerate(seq):
             contacts_seq[t][limb] = v
 
-    timeline = [FrameAnalysis(frame_index=m["index"], contacts=contacts_seq[t])
+    timeline = [FrameAnalysis(frame_index=m["index"], contacts=contacts_seq[t],
+                              points=points_per_frame[t] or {})
                 for t, m in enumerate(per_frame)]
 
     # PASS 2 — draw the annotated video using the smoothed contacts.
@@ -362,7 +385,8 @@ def main() -> None:
     cfg = utils.load_config(args.config) if args.config else utils.load_config()
     min_frames = max(1, round(cfg["pose"].get("primary_min_seconds", 1.0) * fps))
     print_summary(timeline, primary_min_frames=min_frames)
-    print_moves(extract_moves(timeline, fps, min_hold_frames=max(5, round(0.5 * fps))))
+    print_moves(extract_moves(timeline, fps, min_hold_frames=max(5, round(0.5 * fps)),
+                              min_move_px=cfg["pose"].get("move_min_displacement_px", 45)))
     if args.out:
         print(f"Annotated video: {args.out}")
 

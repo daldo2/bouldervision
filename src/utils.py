@@ -341,18 +341,34 @@ def draw_routes(image: np.ndarray, routes) -> np.ndarray:
     return annotated
 
 
-def reference_labs(draw_colors: Dict[str, list]) -> Dict[str, np.ndarray]:
+def reference_labs(
+    draw_colors: Dict[str, list], hue_anchors: Optional[Dict[str, float]] = None
+) -> Dict[str, np.ndarray]:
     """Build name -> Lab reference points from the draw_colors palette.
 
     Used only to attach a human-readable name to a discovered color cluster; it
     does NOT drive the grouping itself.
+
+    The on-screen draw colors are not calibrated to how real holds actually read
+    in Lab — e.g. pure-blue [255,0,0] sits at hue ~-54 deg, but real blue holds
+    cluster near -80, so the draw-blue anchor drifts into purple territory and
+    steals violet holds. `hue_anchors` (name -> hue in degrees, from measuring
+    real holds) rotates just those references onto the real cluster hue, keeping
+    their chroma and lightness, so naming improves without touching the overlay.
     """
     refs: Dict[str, np.ndarray] = {}
     for name, bgr in draw_colors.items():
         if name == "unknown":
             continue
         px = np.uint8([[list(bgr)]])
-        refs[name] = cv2.cvtColor(px, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float64)
+        lab = cv2.cvtColor(px, cv2.COLOR_BGR2LAB)[0, 0].astype(np.float64)
+        if hue_anchors and name in hue_anchors:
+            a, b = lab[1] - 128.0, lab[2] - 128.0
+            chroma = float(np.hypot(a, b))
+            rad = np.radians(float(hue_anchors[name]))
+            lab[1] = 128.0 + chroma * np.cos(rad)
+            lab[2] = 128.0 + chroma * np.sin(rad)
+        refs[name] = lab
     return refs
 
 

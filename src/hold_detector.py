@@ -293,7 +293,8 @@ def run_holds(image_path: str, config_path: str | None = None) -> str:
     print("[3/4] Reading per-hold colors (no route grouping)...")
     use_mask = config.get("color_naming", {}).get("use_mask", False)
     holds = rex.build_holds(image, dfilt.holds_only(dets), use_mask=use_mask)
-    refs = utils.reference_labs(config["draw_colors"])
+    refs = utils.reference_labs(config["draw_colors"],
+                                config.get("color_naming", {}).get("hue_anchors"))
     chroma_min = config.get("color_naming", {}).get("chroma_min", 16.0)
     draw_colors = config["draw_colors"]
 
@@ -372,7 +373,8 @@ def run_routes(image_path: str, config_path: str | None = None, corners=None) ->
             utils.save_image(preview, ppath)
             print(f"     perspective: wrote preview {ppath}")
 
-    refs = utils.reference_labs(config["draw_colors"])
+    refs = utils.reference_labs(config["draw_colors"],
+                                config.get("color_naming", {}).get("hue_anchors"))
     rcfg = config["routes"]
     routes = rex.extract_routes(
         holds,

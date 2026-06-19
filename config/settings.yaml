@@ -102,6 +102,17 @@ color_naming:
                             # tuned via scripts/eval_colors.py — eval recall 0.93/prec 0.74 @ 10
                             # (was 12: 0.90/0.76). 10 recovers muted cyan/green/purple that were
                             # wrongly read as black on dense real walls; lower than 10 drops precision.
+  # Hue calibration (degrees on the Lab a*/b* wheel). Draw colors aren't calibrated
+  # to how real holds read: pure-blue draws at hue ~-54 but real blue holds cluster
+  # near -80, so the blue anchor drifted into purple and named violet holds "blue".
+  # These anchors come from the measured hue histogram of real holds (the natural
+  # cluster valleys: cyan|blue ~-110, blue|purple ~-65). Tuned over cached Labs;
+  # recovers purple ~8->20 with cyan/green/blue counts stable. Remove to use the
+  # raw draw-color hues. Only listed colors are rotated; others use the palette.
+  hue_anchors:
+    cyan: -140
+    blue: -80
+    purple: -50
 
 # ---------------------------------------------------------------------------
 # Perspective rectification — for photos taken at a steep angle to the wall.

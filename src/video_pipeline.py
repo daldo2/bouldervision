@@ -442,7 +442,8 @@ def _filter_by_color(frame, boxes, color, config, include_volumes=True):
     machinery; prints which colours are present so the user can pick a valid one.
     """
     import route_extractor as rex
-    refs = utils.reference_labs(config["draw_colors"])
+    refs = utils.reference_labs(config["draw_colors"],
+                                config.get("color_naming", {}).get("hue_anchors"))
     chroma_min = config.get("color_naming", {}).get("chroma_min", 12)
     vol_frac = config.get("filter", {}).get("volume_area_frac", 0.04)
     img_area = float(frame.shape[0] * frame.shape[1])

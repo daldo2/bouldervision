@@ -36,7 +36,8 @@ def main():
     use_mask = cfg.get("color_naming", {}).get("use_mask", False)
     holds = rex.build_holds(image, dfilt.holds_only(dets), use_mask=use_mask)
 
-    refs = utils.reference_labs(cfg["draw_colors"])
+    refs = utils.reference_labs(cfg["draw_colors"],
+                                cfg.get("color_naming", {}).get("hue_anchors"))
     cmin = cfg.get("color_naming", {}).get("chroma_min", 12.0)
     draw_colors = cfg["draw_colors"]
 

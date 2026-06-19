@@ -42,7 +42,8 @@ def found_colors(image, model, config, chroma_min):
     raw = hd.detect_objects(model, image, det["confidence"], det["iou"], det["max_detections"])
     dets = dfilt.classify_detections(raw, image, config["filter"])
     holds = rex.build_holds(image, dfilt.holds_only(dets))
-    refs = utils.reference_labs(config["draw_colors"])
+    refs = utils.reference_labs(config["draw_colors"],
+                                config.get("color_naming", {}).get("hue_anchors"))
     return Counter(utils.nearest_color_name(h.lab, refs, chroma_min) for h in holds)
 
 

@@ -35,6 +35,7 @@ HOLD = "hold"
 VOLUME = "volume"
 MARKER = "marker"
 TAPE = "tape"
+DOWNCLIMB = "downclimb"
 
 Box = Tuple[int, int, int, int]
 
@@ -65,7 +66,15 @@ def classify_detection(
     Order matters: tape (extreme shape) and volume (class/size) are decided from
     geometry alone; the marker test is last and deliberately strict (small AND
     square AND dark AND near-neutral) so it does not swallow real black holds.
+
+    When `fcfg` carries a `class_kinds` map (a detector retrained with these as
+    real classes, e.g. holds.pt), we TRUST the model's class id and skip the
+    heuristics entirely. Without it we fall back to the geometry rules below.
     """
+    kinds = fcfg.get("class_kinds")
+    if kinds and cls in kinds:
+        return kinds[cls]
+
     w, h = _wh(box)
     if w == 0 or h == 0:
         return HOLD  # degenerate; let downstream skip it

@@ -72,7 +72,7 @@ arrived and is wired (`models.hold_detector: best.pt`) — detection works well.
   occlusion detection + mode filter. **Contact distances are scale-invariant** —
   expressed as a fraction of torso size (`*_frac` in config), so behaviour is the
   same at any resolution / climber size. Overlay: thin skeleton, small body dots,
-  hand = 3 finger rings, foot = heel+toe dots. Outputs: annotated video, contact
+  hand + foot contact points both drawn as small filled dots. Outputs: annotated video, contact
   summary, **move sequence ("beta")**. Extras: `--route-color`, `--stabilize`.
 
 ### Pending / next

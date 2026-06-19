@@ -151,15 +151,20 @@ def detect_objects(
     confidence: float,
     iou: float,
     max_detections: int,
+    augment: bool = False,
 ) -> List[Tuple[int, int, int, int, float, int]]:
     """Like detect_holds, but KEEPS the class id: (x1, y1, x2, y2, conf, cls).
 
     The route pipeline needs the class to tell volumes (e.g. class 1 in best.pt)
     from holds, then post-filters markers/tape by shape — see detection_filter.
     Phase-1 `run()` still uses detect_holds and ignores class, as before.
+
+    `augment=True` runs YOLO's test-time augmentation (multi-scale + flips) for
+    higher recall — slower, used by the annotation bootstrap, off in production.
     """
     print("[2/5] Running detection...")
-    results = model(image, conf=confidence, iou=iou, max_det=max_detections, verbose=False)
+    results = model(image, conf=confidence, iou=iou, max_det=max_detections,
+                    augment=augment, verbose=False)
     out: List[Tuple[int, int, int, int, float, int]] = []
     for box in results[0].boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
@@ -286,7 +291,8 @@ def run_holds(image_path: str, config_path: str | None = None) -> str:
     dets = dfilt.classify_detections(raw, image, config["filter"])
 
     print("[3/4] Reading per-hold colors (no route grouping)...")
-    holds = rex.build_holds(image, dfilt.holds_only(dets))
+    use_mask = config.get("color_naming", {}).get("use_mask", False)
+    holds = rex.build_holds(image, dfilt.holds_only(dets), use_mask=use_mask)
     refs = utils.reference_labs(config["draw_colors"])
     chroma_min = config.get("color_naming", {}).get("chroma_min", 16.0)
     draw_colors = config["draw_colors"]
@@ -297,7 +303,8 @@ def run_holds(image_path: str, config_path: str | None = None) -> str:
         name = utils.nearest_color_name(h.lab, refs, chroma_min)
         counts[name] = counts.get(name, 0) + 1
         utils.draw_box(annotated, h.box, name, utils.draw_color_for(name, draw_colors))
-    aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200), dfilt.TAPE: (200, 200, 0)}
+    aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200),
+                   dfilt.TAPE: (200, 200, 0), dfilt.DOWNCLIMB: (255, 0, 255)}
     aside = {k: 0 for k in aside_style}
     for d in dets:
         if d.kind in aside_style:
@@ -342,11 +349,13 @@ def run_routes(image_path: str, config_path: str | None = None, corners=None) ->
     #     markers and difficulty tape are set aside (and reported below).
     dets = dfilt.classify_detections(raw, image, config["filter"])
     hold_boxes = dfilt.holds_only(dets)
-    aside = {k: len(dfilt.of_kind(dets, k)) for k in (dfilt.VOLUME, dfilt.MARKER, dfilt.TAPE)}
+    aside = {k: len(dfilt.of_kind(dets, k))
+             for k in (dfilt.VOLUME, dfilt.MARKER, dfilt.TAPE, dfilt.DOWNCLIMB)}
 
     # 2. Read each hold's real color (Lab) and 3. group into routes.
     print("[3/5] Reading hold colors and grouping into routes...")
-    holds = rex.build_holds(image, hold_boxes)
+    use_mask = config.get("color_naming", {}).get("use_mask", False)
+    holds = rex.build_holds(image, hold_boxes, use_mask=use_mask)
 
     # 2b. Optional perspective rectification for steeply angled photos: warp hold
     #     positions into a frontal plane so spatial grouping is not foreshortened.
@@ -374,12 +383,14 @@ def run_routes(image_path: str, config_path: str | None = None, corners=None) ->
         adaptive_spatial=rcfg.get("adaptive_spatial", False),
         spatial_scale_eps=rcfg.get("spatial_scale_eps", 8.0),
         chroma_min=config.get("color_naming", {}).get("chroma_min", 16.0),
+        group_by=rcfg.get("group_by", "lab"),
     )
 
     # 4. Draw and save the route map. Overlay set-aside detections in distinct
     #    neutral colors so their classification can be eyeballed for mistakes.
     annotated = utils.draw_routes(image, routes)
-    aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200), dfilt.TAPE: (200, 200, 0)}
+    aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200),
+                   dfilt.TAPE: (200, 200, 0), dfilt.DOWNCLIMB: (255, 0, 255)}
     for d in dets:
         if d.kind in aside_style:
             utils.draw_box(annotated, d.box, d.kind, aside_style[d.kind])

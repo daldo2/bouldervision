@@ -126,6 +126,24 @@ def cluster_by_color(holds: List[Hold], eps: float, min_holds: int = 1) -> List[
     return [g for label, g in sorted(groups.items()) if label != -1]
 
 
+def cluster_by_name(
+    holds: List[Hold], references: Dict[str, np.ndarray], chroma_min: float = 12.0
+) -> List[List[Hold]]:
+    """Group holds by their discrete nearest color NAME (red/blue/black/...).
+
+    An alternative to cluster_by_color for DENSE walls. DBSCAN on raw Lab chains
+    many holds into a single cluster through near-neutral ones — e.g. ~180 holds
+    collapse into one "black" route. Bucketing by the already-tuned color name
+    avoids that chaining; the spatial step still separates two same-named routes
+    set apart on the wall.
+    """
+    groups: Dict[str, List[Hold]] = {}
+    for h in holds:
+        name = utils.nearest_color_name(h.lab, references, chroma_min)
+        groups.setdefault(name, []).append(h)
+    return [groups[k] for k in sorted(groups)]
+
+
 def split_by_position(holds: List[Hold], eps_px: float, min_holds: int = 1) -> List[List[Hold]]:
     """Split holds that share a color into spatially-coherent clusters.
 
@@ -192,19 +210,21 @@ def build_holds(
     image_bgr: np.ndarray,
     boxes: List[Tuple[int, int, int, int, float]],
     balance: bool = True,
+    use_mask: bool = False,
 ) -> List["Hold"]:
     """Turn detector boxes into Holds carrying each region's dominant Lab color.
 
     `boxes` are (x1, y1, x2, y2, confidence) — exactly what hold_detector emits.
     With `balance=True` we white-balance the whole image first so colors read
-    consistently. Boxes that crop to nothing are skipped.
+    consistently. `use_mask` samples color from a GrabCut hold mask (excludes
+    wall/pocket) instead of the box center. Boxes that crop to nothing are skipped.
     """
     img = utils.white_balance(image_bgr) if balance else image_bgr
     holds: List[Hold] = []
     for (x1, y1, x2, y2, conf) in boxes:
         cx1, cy1 = max(0, x1), max(0, y1)
         cx2, cy2 = max(0, x2), max(0, y2)
-        lab = utils.dominant_color_lab(img[cy1:cy2, cx1:cx2])
+        lab = utils.dominant_color_lab(img[cy1:cy2, cx1:cx2], use_mask=use_mask)
         if lab is None:
             continue
         holds.append(Hold(box=(x1, y1, x2, y2), confidence=float(conf), lab=lab))
@@ -223,6 +243,7 @@ def extract_routes(
     adaptive_spatial: bool = False,
     spatial_scale_eps: float = 8.0,
     chroma_min: float = 12.0,
+    group_by: str = "lab",
 ) -> List[Route]:
     """Turn a flat list of holds into named routes.
 
@@ -243,7 +264,14 @@ def extract_routes(
 
     routes: List[Route] = []
 
-    for color_group in cluster_by_color(holds, eps=color_eps):
+    # "name" buckets holds by their discrete color name (robust on dense walls);
+    # "lab" is the original per-image DBSCAN on raw Lab. Name mode needs refs.
+    if group_by == "name" and references is not None:
+        color_groups = cluster_by_name(holds, references, chroma_min)
+    else:
+        color_groups = cluster_by_color(holds, eps=color_eps)
+
+    for color_group in color_groups:
         for route_holds in split(color_group):
             rep_lab = np.median([h.lab for h in route_holds], axis=0).astype(np.float64)
             name = utils.nearest_color_name(rep_lab, references, chroma_min) if references else ""

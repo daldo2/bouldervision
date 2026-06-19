@@ -488,18 +488,14 @@ def _draw_frame(frame, hold_boxes, poses, contacts, points=None) -> None:
     disp = next((p.contact_pts["_display"] for p in poses
                  if p.contact_pts and "_display" in p.contact_pts), None)
     if disp is not None:
-        # Whole-body contact AREA: hands as small THIN RINGS (3 fingertips sit close
-        # together so filled dots merged into a blob), feet as small filled dots.
+        # Whole-body contact AREA: hands and feet both as small filled dots
+        # (fingertips + big-toe / heel points), green when gripping else red.
         for limb, pts in disp.items():
             col = (0, 255, 0) if contacts.get(limb) is not None else (0, 0, 255)
-            ring = "hand" in limb
             for x, y, c in pts:
                 if c <= 0:
                     continue
-                if ring:
-                    cv2.circle(frame, (int(x), int(y)), 3, col, 1, cv2.LINE_AA)
-                else:
-                    cv2.circle(frame, (int(x), int(y)), 2, col, -1, cv2.LINE_AA)
+                cv2.circle(frame, (int(x), int(y)), 2, col, -1, cv2.LINE_AA)
     elif points:
         # No whole-body points: fall back to one circle at the extrapolated point.
         for limb, (x, y, c) in points.items():

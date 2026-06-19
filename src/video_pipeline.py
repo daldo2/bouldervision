@@ -506,7 +506,7 @@ def _draw_frame(frame, hold_boxes, poses, contacts, points=None, hold_colors=Non
     touched = {idx for idx in contacts.values() if idx is not None}
     for i, (x1, y1, x2, y2) in enumerate(hold_boxes):
         if hold_colors is not None and i < len(hold_colors):
-            color, thick = hold_colors[i], 2
+            color, thick = hold_colors[i], 1
         else:
             # All boxes thin (1px); touched vs untouched read by colour, not weight.
             color, thick = ((0, 255, 0) if i in touched else (160, 160, 160)), 1

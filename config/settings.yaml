@@ -157,6 +157,11 @@ draw_colors:
   purple: [255, 0, 200]
   pink:   [147, 20, 255]     # hot pink/rose — was missing, holds fell through to red/purple/black
   white:  [255, 255, 255]
+  grey:   [100, 100, 100]    # mid-grey neutral anchor. With only black+white, every
+                             # grey/tan/chalky hold (L<~148) collapsed to "black".
+                             # Three neutral anchors now split by lightness:
+                             # black L<~75, grey ~75-182, white L>~182 — cuts the
+                             # false-black count ~44->4 on dense real walls.
   black:  [40, 40, 40]
   unknown: [200, 200, 200]
 

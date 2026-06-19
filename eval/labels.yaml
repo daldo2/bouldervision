@@ -5,8 +5,13 @@
 # aside), so it is NOT listed as a hold color unless real black holds exist.
 # Owner-verified 2026-06-16. Some entries still tentative — see inline notes.
 #
-# Palette names: red orange yellow green blue purple pink cyan white black.
+# Palette names: red orange yellow green blue purple pink cyan white grey black.
 # (pink + cyan were missing from the palette — that's a known gap we're fixing.)
+# NOTE: `grey` is a NEUTRAL the pipeline now emits (mid-grey/tan/chalky holds that
+# used to collapse to "black"). Like black it's volume-ish furniture, so it is NOT
+# listed in colors_present and the harness scores it as "spurious" — that lowers
+# the reported precision but is expected; judge grey/black changes by the per-hold
+# diagnostic (scripts/diag_hold_colors.py), not this image-level chromatic harness.
 
 min_holds: 2          # a color must label >= this many holds to count as "found"
 

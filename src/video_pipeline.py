@@ -174,6 +174,7 @@ def analyze_video(
     max_frames: Optional[int] = None,
     stabilize: bool = False,
     route_color: Optional[str] = None,
+    color_holds: bool = False,
 ) -> List[FrameAnalysis]:
     """Run the full analysis pipeline over a video file.
 
@@ -240,6 +241,7 @@ def analyze_video(
     # hold indices are stable for the whole clip.
     hold_boxes: List[tuple] = []
     ref_boxes: List[tuple] = []
+    hold_colors: Optional[List[tuple]] = None  # one BGR per hold, fixed for the clip
     stabilizer = None
     if detect_every == 0:
         cap.set(cv2.CAP_PROP_POS_FRAMES, detect_frame)
@@ -249,6 +251,8 @@ def analyze_video(
             if route_color:
                 hold_boxes = _filter_by_color(dframe, hold_boxes, route_color, config)
             ref_boxes = list(hold_boxes)
+            if color_holds:
+                hold_colors = _hold_colors(dframe, ref_boxes, config)
             if stabilize:
                 import stabilize as stab  # lazy: only needed for handheld clips
                 stabilizer = stab.CameraStabilizer(dframe)
@@ -367,7 +371,8 @@ def analyze_video(
                 if not ok:
                     break
                 poses = [m["pose"]] if m["pose"] is not None else []
-                _draw_frame(frame, m["boxes"], poses, contacts_seq[t], points_per_frame[t])
+                _draw_frame(frame, m["boxes"], poses, contacts_seq[t],
+                            points_per_frame[t], hold_colors=hold_colors)
                 writer.write(frame)
         finally:
             cap.release()
@@ -412,13 +417,16 @@ def main() -> None:
                         help="Handheld camera: warp the static holds to follow the camera each frame.")
     parser.add_argument("--route-color", default=None,
                         help="Analyze only one route: keep holds of this color (red/blue/green/...).")
+    parser.add_argument("--color-holds", action="store_true",
+                        help="Outline every hold box in its detected color (fixed from the detect "
+                             "frame), instead of grey/green-by-touch. Keeps skeleton + contacts.")
     args = parser.parse_args()
 
     timeline = analyze_video(
         args.video, output_path=args.out, config_path=args.config,
         detect_every=args.detect_every, detect_frame=args.detect_frame,
         start_frame=args.start_frame, max_frames=args.max_frames, stabilize=args.stabilize,
-        route_color=args.route_color,
+        route_color=args.route_color, color_holds=args.color_holds,
     )
     # Translate the "real route hold" dwell threshold from seconds to frames.
     cap = cv2.VideoCapture(args.video)
@@ -466,13 +474,43 @@ def _filter_by_color(frame, boxes, color, config, include_volumes=True):
     return kept
 
 
-def _draw_frame(frame, hold_boxes, poses, contacts, points=None) -> None:
-    """Overlay holds (touched ones highlighted), the skeleton, and contacts in place."""
+def _hold_colors(frame, boxes, config) -> List[tuple]:
+    """One BGR per box (index-aligned) from each hold's detected color name.
+
+    Computed ONCE on the detect frame and reused for the whole clip, so the hold
+    colors are fixed and don't flicker. Uses the same masked-color path + hue
+    calibration as the still-image pipeline. Boxes that crop to nothing fall back
+    to neutral grey so the list stays aligned with `boxes`.
+    """
+    refs = utils.reference_labs(config["draw_colors"],
+                               config.get("color_naming", {}).get("hue_anchors"))
+    cmin = config.get("color_naming", {}).get("chroma_min", 10)
+    use_mask = config.get("color_naming", {}).get("use_mask", False)
+    draw_colors = config["draw_colors"]
+    img = utils.white_balance(frame)
+    colors: List[tuple] = []
+    for (x1, y1, x2, y2) in boxes:
+        cx1, cy1, cx2, cy2 = max(0, x1), max(0, y1), max(0, x2), max(0, y2)
+        lab = utils.dominant_color_lab(img[cy1:cy2, cx1:cx2], use_mask=use_mask)
+        name = utils.nearest_color_name(lab, refs, cmin) if lab is not None else ""
+        colors.append(utils.draw_color_for(name, draw_colors) if name else (160, 160, 160))
+    return colors
+
+
+def _draw_frame(frame, hold_boxes, poses, contacts, points=None, hold_colors=None) -> None:
+    """Overlay holds, the skeleton, and contacts in place.
+
+    With `hold_colors` each hold box is outlined in its detected color (fixed for
+    the clip); otherwise boxes are thin grey/green by whether they're touched.
+    """
     touched = {idx for idx in contacts.values() if idx is not None}
     for i, (x1, y1, x2, y2) in enumerate(hold_boxes):
-        # All boxes thin (1px); touched vs untouched read by colour, not weight.
-        color = (0, 255, 0) if i in touched else (160, 160, 160)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1, cv2.LINE_AA)
+        if hold_colors is not None and i < len(hold_colors):
+            color, thick = hold_colors[i], 2
+        else:
+            # All boxes thin (1px); touched vs untouched read by colour, not weight.
+            color, thick = ((0, 255, 0) if i in touched else (160, 160, 160)), 1
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thick, cv2.LINE_AA)
 
     for pose in poses:
         kp = pose.keypoints

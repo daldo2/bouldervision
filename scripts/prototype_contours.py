@@ -12,9 +12,16 @@ import sys
 
 import cv2
 import numpy as np
+from PIL import Image, ImageOps
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src import hold_detector, utils  # noqa: E402
+
+
+def load_upright_bgr(path):
+    """Load with EXIF orientation applied (phone portrait shots) as BGR uint8."""
+    im = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    return cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
 
 
 def box_contour(img, box, inset=0.06, iters=4):
@@ -56,7 +63,7 @@ def main():
     img_path = sys.argv[1] if len(sys.argv) > 1 else "data/input/new_photos/20260618_092148.jpg"
     config = utils.load_config()
     model = hold_detector.load_detector(config["models"]["hold_detector"])
-    image = cv2.imread(img_path)
+    image = load_upright_bgr(img_path)
     boxes = hold_detector.detect_holds(
         model, image,
         confidence=config["detection"]["confidence"],

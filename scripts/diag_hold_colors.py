@@ -9,6 +9,8 @@ import sys
 from collections import Counter
 
 import cv2
+import numpy as np
+from PIL import Image, ImageOps
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src import detection_filter as dfilt  # noqa: E402
@@ -17,10 +19,16 @@ from src import route_extractor as rex  # noqa: E402
 from src import utils  # noqa: E402
 
 
+def load_upright_bgr(path):
+    """Load with EXIF orientation applied (phone portrait shots) as BGR uint8."""
+    im = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    return cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+
+
 def main():
     img_path = sys.argv[1] if len(sys.argv) > 1 else "data/input/new_photos/20260618_092148.jpg"
     cfg = utils.load_config()
-    image = utils.read_image(img_path)
+    image = load_upright_bgr(img_path)
     model = hd.load_detector(cfg["models"]["hold_detector"])
     det = cfg["detection"]
     raw = hd.detect_objects(model, image, det["confidence"], det["iou"], det["max_detections"])

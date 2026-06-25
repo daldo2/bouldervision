@@ -296,12 +296,13 @@ def run_holds(image_path: str, config_path: str | None = None) -> str:
     refs = utils.reference_labs(config["draw_colors"],
                                 config.get("color_naming", {}).get("hue_anchors"))
     chroma_min = config.get("color_naming", {}).get("chroma_min", 16.0)
+    rescue = config.get("color_naming", {}).get("rescue")
     draw_colors = config["draw_colors"]
 
     annotated = image.copy()
     counts: dict = {}
     for h in holds:
-        name = utils.nearest_color_name(h.lab, refs, chroma_min)
+        name = utils.nearest_color_name(h.lab, refs, chroma_min, rescue)
         counts[name] = counts.get(name, 0) + 1
         utils.draw_box(annotated, h.box, name, utils.draw_color_for(name, draw_colors))
     aside_style = {dfilt.VOLUME: (150, 150, 150), dfilt.MARKER: (200, 0, 200),
@@ -386,6 +387,7 @@ def run_routes(image_path: str, config_path: str | None = None, corners=None) ->
         spatial_scale_eps=rcfg.get("spatial_scale_eps", 8.0),
         chroma_min=config.get("color_naming", {}).get("chroma_min", 16.0),
         group_by=rcfg.get("group_by", "lab"),
+        rescue=config.get("color_naming", {}).get("rescue"),
     )
 
     # 4. Draw and save the route map. Overlay set-aside detections in distinct

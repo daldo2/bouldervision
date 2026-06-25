@@ -27,6 +27,8 @@ models/*.onnx
 #         it is committed except the .gitkeep that preserves the dir.
 data/input/*.jpeg
 data/input/*.jpg
+data/input/**/*.jpeg
+data/input/**/*.jpg
 !data/input/wall.jpg
 data/output/*
 !data/output/.gitkeep

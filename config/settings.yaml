@@ -113,6 +113,16 @@ color_naming:
     cyan: -140
     blue: -80
     purple: -50
+  # Low-chroma rescue: this gym's faded turquoise reads chroma ~7-10 (below
+  # chroma_min) but its hue clusters tightly at the cyan anchor, so it was
+  # neutralizing to grey (a recall loss measured on the close shot 095639).
+  # A hold with chroma in [rescue.chroma_min, chroma_min) whose hue is within
+  # hue_tol deg of an eligible anchor is named that color, not grey. Only colors
+  # with a TIGHT real hue cluster belong here (cyan); true greys have random hue.
+  rescue:
+    chroma_min: 7
+    hue_tol: 22
+    colors: [cyan]
 
 # ---------------------------------------------------------------------------
 # Perspective rectification — for photos taken at a steep angle to the wall.

@@ -30,3 +30,20 @@ images:
 
   - file: c5e0fe3a-7a51-4235-a530-65261cf83da5.jpeg   # medium distance
     colors_present: [red, yellow, blue, white, pink, cyan, green]
+
+  # --- 2026-06-18 gym shoot (new_photos/) -------------------------------------
+  # DRAFT GT by Claude from downscaled photos — OWNER PLEASE VERIFY, especially
+  # the pink/red split and any orange (that's the axis under calibration test).
+  # Big teal triangles/hexagons = VOLUMES (set aside), not listed. grey/black
+  # neutral furniture not listed (scored spurious by design).
+  - file: new_photos/20260618_095639.jpg              # close, clean — best GT
+    colors_present: [blue, cyan, pink, red]            # coral holds = pink/red? verify
+
+  - file: new_photos/20260618_103756_011.jpg          # wide wall, angled
+    colors_present: [red, yellow, blue, purple, white, cyan]
+
+  - file: new_photos/20260618_103756_001.jpg          # wide wall, angled
+    colors_present: [red, yellow, blue, purple, cyan, pink, white]
+
+  - file: new_photos/20260618_091319.jpg              # busy wall (hard)
+    colors_present: [red, pink, blue, purple, yellow, green]

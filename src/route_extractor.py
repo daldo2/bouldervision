@@ -127,7 +127,8 @@ def cluster_by_color(holds: List[Hold], eps: float, min_holds: int = 1) -> List[
 
 
 def cluster_by_name(
-    holds: List[Hold], references: Dict[str, np.ndarray], chroma_min: float = 12.0
+    holds: List[Hold], references: Dict[str, np.ndarray], chroma_min: float = 12.0,
+    rescue: Optional[dict] = None,
 ) -> List[List[Hold]]:
     """Group holds by their discrete nearest color NAME (red/blue/black/...).
 
@@ -139,7 +140,7 @@ def cluster_by_name(
     """
     groups: Dict[str, List[Hold]] = {}
     for h in holds:
-        name = utils.nearest_color_name(h.lab, references, chroma_min)
+        name = utils.nearest_color_name(h.lab, references, chroma_min, rescue)
         groups.setdefault(name, []).append(h)
     return [groups[k] for k in sorted(groups)]
 
@@ -244,6 +245,7 @@ def extract_routes(
     spatial_scale_eps: float = 8.0,
     chroma_min: float = 12.0,
     group_by: str = "lab",
+    rescue: Optional[dict] = None,
 ) -> List[Route]:
     """Turn a flat list of holds into named routes.
 
@@ -267,14 +269,14 @@ def extract_routes(
     # "name" buckets holds by their discrete color name (robust on dense walls);
     # "lab" is the original per-image DBSCAN on raw Lab. Name mode needs refs.
     if group_by == "name" and references is not None:
-        color_groups = cluster_by_name(holds, references, chroma_min)
+        color_groups = cluster_by_name(holds, references, chroma_min, rescue)
     else:
         color_groups = cluster_by_color(holds, eps=color_eps)
 
     for color_group in color_groups:
         for route_holds in split(color_group):
             rep_lab = np.median([h.lab for h in route_holds], axis=0).astype(np.float64)
-            name = utils.nearest_color_name(rep_lab, references, chroma_min) if references else ""
+            name = utils.nearest_color_name(rep_lab, references, chroma_min, rescue) if references else ""
             for h in route_holds:
                 h.name = name
             routes.append(Route(color_name=name, lab=rep_lab, holds=route_holds))

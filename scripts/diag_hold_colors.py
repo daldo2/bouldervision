@@ -39,12 +39,13 @@ def main():
     refs = utils.reference_labs(cfg["draw_colors"],
                                 cfg.get("color_naming", {}).get("hue_anchors"))
     cmin = cfg.get("color_naming", {}).get("chroma_min", 12.0)
+    rescue = cfg.get("color_naming", {}).get("rescue")
     draw_colors = cfg["draw_colors"]
 
     out = image.copy()
     counts = Counter()
     for h in holds:
-        name = utils.nearest_color_name(h.lab, refs, cmin)
+        name = utils.nearest_color_name(h.lab, refs, cmin, rescue)
         counts[name] += 1
         col = utils.draw_color_for(name, draw_colors)
         x1, y1, x2, y2 = h.box

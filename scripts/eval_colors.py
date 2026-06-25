@@ -25,7 +25,9 @@ import sys
 from collections import Counter
 
 import cv2
+import numpy as np
 import yaml
+from PIL import Image, ImageOps
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
@@ -36,15 +38,27 @@ import route_extractor as rex  # noqa: E402
 import utils  # noqa: E402
 
 
+def load_upright_bgr(path):
+    """Load with EXIF orientation applied (phone portrait shots) as BGR uint8.
+
+    cv2.imread ignores EXIF, so portrait phone photos (orientation=6) would be
+    read sideways — inconsistent with the real pipeline and the diagnostics.
+    """
+    im = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    return cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+
+
 def found_colors(image, model, config, chroma_min):
     """Set of colors -> hold counts the pipeline names for one image."""
     det = config["detection"]
+    cn = config.get("color_naming", {})
+    use_mask = cn.get("use_mask", False)
+    rescue = cn.get("rescue")
     raw = hd.detect_objects(model, image, det["confidence"], det["iou"], det["max_detections"])
     dets = dfilt.classify_detections(raw, image, config["filter"])
-    holds = rex.build_holds(image, dfilt.holds_only(dets))
-    refs = utils.reference_labs(config["draw_colors"],
-                                config.get("color_naming", {}).get("hue_anchors"))
-    return Counter(utils.nearest_color_name(h.lab, refs, chroma_min) for h in holds)
+    holds = rex.build_holds(image, dfilt.holds_only(dets), use_mask=use_mask)
+    refs = utils.reference_labs(config["draw_colors"], cn.get("hue_anchors"))
+    return Counter(utils.nearest_color_name(h.lab, refs, chroma_min, rescue) for h in holds)
 
 
 def main() -> None:
@@ -75,10 +89,10 @@ def main() -> None:
 
     for item in spec["images"]:
         path = os.path.join(input_dir, item["file"])
-        image = cv2.imread(path)
-        if image is None:
+        if not os.path.exists(path):
             print(f"{item['file'][:10]:10}  (missing on disk — skipped)")
             continue
+        image = load_upright_bgr(path)
         present = set(item["colors_present"])
         counts = found_colors(image, model, config, chroma_min)
         found = {c for c, k in counts.items() if k >= min_holds and c not in ("unknown",)}

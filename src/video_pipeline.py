@@ -453,13 +453,14 @@ def _filter_by_color(frame, boxes, color, config, include_volumes=True):
     refs = utils.reference_labs(config["draw_colors"],
                                 config.get("color_naming", {}).get("hue_anchors"))
     chroma_min = config.get("color_naming", {}).get("chroma_min", 12)
+    rescue = config.get("color_naming", {}).get("rescue")
     vol_frac = config.get("filter", {}).get("volume_area_frac", 0.04)
     img_area = float(frame.shape[0] * frame.shape[1])
 
     holds = rex.build_holds(frame, [(*b, 1.0) for b in boxes])
     present, kept, vols = Counter(), [], 0
     for h in holds:
-        name = utils.nearest_color_name(h.lab, refs, chroma_min)
+        name = utils.nearest_color_name(h.lab, refs, chroma_min, rescue)
         present[name] += 1
         x1, y1, x2, y2 = h.box
         is_volume = include_volumes and ((x2 - x1) * (y2 - y1) / img_area) >= vol_frac
@@ -485,6 +486,7 @@ def _hold_colors(frame, boxes, config) -> List[tuple]:
     refs = utils.reference_labs(config["draw_colors"],
                                config.get("color_naming", {}).get("hue_anchors"))
     cmin = config.get("color_naming", {}).get("chroma_min", 10)
+    rescue = config.get("color_naming", {}).get("rescue")
     use_mask = config.get("color_naming", {}).get("use_mask", False)
     draw_colors = config["draw_colors"]
     img = utils.white_balance(frame)
@@ -492,7 +494,7 @@ def _hold_colors(frame, boxes, config) -> List[tuple]:
     for (x1, y1, x2, y2) in boxes:
         cx1, cy1, cx2, cy2 = max(0, x1), max(0, y1), max(0, x2), max(0, y2)
         lab = utils.dominant_color_lab(img[cy1:cy2, cx1:cx2], use_mask=use_mask)
-        name = utils.nearest_color_name(lab, refs, cmin) if lab is not None else ""
+        name = utils.nearest_color_name(lab, refs, cmin, rescue) if lab is not None else ""
         colors.append(utils.draw_color_for(name, draw_colors) if name else (160, 160, 160))
     return colors
 

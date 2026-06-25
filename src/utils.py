@@ -383,7 +383,10 @@ def _chroma_hue(lab: np.ndarray) -> Tuple[float, float]:
 
 
 def nearest_color_name(
-    lab: np.ndarray, refs: Dict[str, np.ndarray], chroma_min: float = 12.0
+    lab: np.ndarray,
+    refs: Dict[str, np.ndarray],
+    chroma_min: float = 12.0,
+    rescue: Optional[dict] = None,
 ) -> str:
     """Name a Lab color, matching hue for colored holds and lightness for grays.
 
@@ -398,6 +401,14 @@ def nearest_color_name(
         ignores how dark or washed-out the photo made it. Only chromatic
         references compete here, so a dim blue still reads as blue.
 
+    `rescue` (optional) recovers washed-out but hue-consistent holds that would
+    otherwise neutralize to grey — e.g. this gym's faded turquoise, which reads
+    chroma ~7-10 (below `chroma_min`) yet clusters tightly around the cyan hue.
+    A hold with chroma in [rescue["chroma_min"], chroma_min) whose hue is within
+    `rescue["hue_tol"]` degrees of one of the eligible `rescue["colors"]` anchors
+    is named that color instead of neutral. Only colors with a *tight* real-world
+    hue cluster belong here; true greys (chroma <~5, random hue) stay neutral.
+
     Falls back to plain Lab distance if the palette has no usable references.
     '' if there are no references at all.
     """
@@ -410,13 +421,20 @@ def nearest_color_name(
         chroma, hue = _chroma_hue(ref_lab)
         (colored_refs if chroma >= chroma_min else neutral_refs)[name] = (ref_lab, hue)
 
+    def hue_gap(name: str) -> float:
+        d = abs(target_hue - colored_refs[name][1])
+        return min(d, 2 * np.pi - d)  # wrap-around on the color wheel
+
     if target_chroma < chroma_min and neutral_refs:
+        if rescue and colored_refs and target_chroma >= rescue.get("chroma_min", chroma_min):
+            eligible = [n for n in rescue.get("colors", []) if n in colored_refs]
+            if eligible:
+                best = min(eligible, key=hue_gap)
+                if np.degrees(hue_gap(best)) <= rescue.get("hue_tol", 0.0):
+                    return best
         return min(neutral_refs, key=lambda n: abs(lab[0] - neutral_refs[n][0][0]))
 
     if colored_refs:
-        def hue_gap(name: str) -> float:
-            d = abs(target_hue - colored_refs[name][1])
-            return min(d, 2 * np.pi - d)  # wrap-around on the color wheel
         return min(colored_refs, key=hue_gap)
 
     # No reference of the needed kind: fall back to nearest full-Lab point.

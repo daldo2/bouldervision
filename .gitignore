@@ -19,6 +19,7 @@ ENV/
 *.engine
 models/*.pt
 models/*.onnx
+models/*.mat
 
 # --- Data ---
 # input/  holds the things you analyze. The tiny synthetic wall.jpg is tracked

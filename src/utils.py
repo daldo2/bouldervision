@@ -249,6 +249,52 @@ def hold_foreground_mask(crop_bgr: np.ndarray, inset: float = 0.08, iters: int =
     return fg if fg.sum() >= 0.05 * fg.size else None
 
 
+def select_region_pixels(
+    crop_bgr: np.ndarray,
+    sat_min: int = 45,
+    val_min: int = 40,
+    val_max: int = 235,
+    min_fraction: float = 0.05,
+    center_frac: float = 0.6,
+    use_mask: bool = False,
+) -> np.ndarray:
+    """The BGR pixels we trust as "the hold" color, for a box crop.
+
+    Shared selection logic behind both the Lab-median naming and the w2c
+    color-name naming, so they see *identical* pixels (a fair comparison):
+      - Region: a GrabCut foreground mask (excludes wall + pocket) when
+        `use_mask`, else the box CENTER (`center_frac`) as a coarse stand-in —
+        the box corners are mostly wall/shadow that drags color toward neutral.
+      - We prefer *chromatic* pixels: saturated enough (`sat_min`) and neither
+        crushed-dark nor blown-out (`val_min`..`val_max`) — skips chalk dust,
+        deep shadow, specular highlights. If too few chromatic pixels (an
+        achromatic hold), fall back to in-range region pixels, then the region,
+        then everything.
+
+    Returns an (N, 3) uint8 BGR array; empty (0, 3) for an empty crop.
+    """
+    if crop_bgr is None or crop_bgr.size == 0:
+        return np.empty((0, 3), np.uint8)
+
+    region = hold_foreground_mask(crop_bgr) if use_mask else None
+    if region is None:
+        crop_bgr = center_inset(crop_bgr, center_frac)
+        region = np.ones(crop_bgr.shape[:2], dtype=bool)
+
+    bgr = crop_bgr.reshape(-1, 3)
+    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    sat, val = hsv[:, 1], hsv[:, 2]
+    reg = region.reshape(-1)
+
+    chromatic = reg & (sat >= sat_min) & (val >= val_min) & (val <= val_max)
+    if int(chromatic.sum()) >= max(1, int(min_fraction * int(reg.sum()))):
+        return bgr[chromatic]
+    valid = reg & (val >= val_min) & (val <= val_max)
+    if int(valid.sum()):
+        return bgr[valid]
+    return bgr[reg] if int(reg.sum()) else bgr
+
+
 def dominant_color_lab(
     crop_bgr: np.ndarray,
     sat_min: int = 45,
@@ -260,48 +306,18 @@ def dominant_color_lab(
 ) -> Optional[np.ndarray]:
     """Return a hold crop's dominant color as a Lab vector (OpenCV 8-bit scale).
 
-    Robustness tricks (this is what makes it survive real photos):
-      - We sample only the box CENTER (`center_frac`), since the corners of an
-        axis-aligned box around a hold are mostly wall/shadow background that
-        would otherwise drag a colored hold toward a dark neutral ("black").
-      - We prefer *chromatic* pixels: saturated enough (`sat_min`) and neither
-        crushed-dark nor blown-out (`val_min`..`val_max`). This skips chalk dust
-        (bright, desaturated), deep shadows, and specular highlights that would
-        otherwise pollute the color. `sat_min` is deliberately forgiving so
-        glossy/muted holds still register as colored, not achromatic.
-      - We take the MEDIAN, not the mean, so a few stray pixels (a bolt, a smear
-        of chalk) don't drag the result.
-      - If a hold is essentially achromatic (black / white / gray), there are no
-        chromatic pixels — we then fall back to the median over all pixels, which
-        still separates black (low L) from white (high L).
+    Takes the MEDIAN Lab over `select_region_pixels` (chromatic-preferred hold
+    pixels), so a few stray pixels (a bolt, a chalk smear) don't drag the result
+    and an achromatic hold still separates black (low L) from white (high L).
 
     Returns None for an empty crop.
     """
-    if crop_bgr is None or crop_bgr.size == 0:
+    px = select_region_pixels(crop_bgr, sat_min, val_min, val_max,
+                              min_fraction, center_frac, use_mask)
+    if px.size == 0:
         return None
-
-    # Region we trust as "the hold": a GrabCut foreground mask (excludes wall +
-    # pocket) when use_mask, else the box center as a coarse stand-in.
-    region = hold_foreground_mask(crop_bgr) if use_mask else None
-    if region is None:
-        crop_bgr = center_inset(crop_bgr, center_frac)
-        region = np.ones(crop_bgr.shape[:2], dtype=bool)
-
-    lab = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2LAB).reshape(-1, 3)
-    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV).reshape(-1, 3)
-    sat, val = hsv[:, 1], hsv[:, 2]
-    reg = region.reshape(-1)
-
-    chromatic = reg & (sat >= sat_min) & (val >= val_min) & (val <= val_max)
-    if int(chromatic.sum()) >= max(1, int(min_fraction * int(reg.sum()))):
-        selected = lab[chromatic]
-    else:
-        # Achromatic hold: keep in-range region pixels (drops dark pocket / bright
-        # chalk that would skew L), falling back to the whole region, then all.
-        valid = reg & (val >= val_min) & (val <= val_max)
-        selected = lab[valid] if int(valid.sum()) else (lab[reg] if int(reg.sum()) else lab)
-
-    return np.median(selected, axis=0).astype(np.float64)
+    lab = cv2.cvtColor(px.reshape(-1, 1, 3), cv2.COLOR_BGR2LAB).reshape(-1, 3)
+    return np.median(lab, axis=0).astype(np.float64)
 
 
 def lab_to_bgr(lab: np.ndarray) -> Tuple[int, int, int]:

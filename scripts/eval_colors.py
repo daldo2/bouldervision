@@ -48,8 +48,16 @@ def load_upright_bgr(path):
     return cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
 
 
-def found_colors(image, model, config, chroma_min):
-    """Set of colors -> hold counts the pipeline names for one image."""
+def found_colors(image, model, config, chroma_min, naming="hue"):
+    """Set of colors -> hold counts the pipeline names for one image.
+
+    `naming` selects the color-name strategy, so we can A/B them on the same
+    detections + same selected pixels:
+      - "hue"      : our hue-anchor + cyan-rescue path (production).
+      - "w2c"      : van de Weijer Color Names lookup over the hold's pixels.
+      - "w2c+cyan" : w2c, but graft our measured cyan rescue back on (w2c has no
+                     cyan term, so faded turquoise would otherwise read blue/green).
+    """
     det = config["detection"]
     cn = config.get("color_naming", {})
     use_mask = cn.get("use_mask", False)
@@ -58,7 +66,23 @@ def found_colors(image, model, config, chroma_min):
     dets = dfilt.classify_detections(raw, image, config["filter"])
     holds = rex.build_holds(image, dfilt.holds_only(dets), use_mask=use_mask)
     refs = utils.reference_labs(config["draw_colors"], cn.get("hue_anchors"))
-    return Counter(utils.nearest_color_name(h.lab, refs, chroma_min, rescue) for h in holds)
+    if naming == "hue":
+        return Counter(utils.nearest_color_name(h.lab, refs, chroma_min, rescue) for h in holds)
+
+    import color_names_w2c as cnw2c
+    w2c = cnw2c.load_w2c()
+    wb = utils.white_balance(image)  # same balanced pixels build_holds saw
+    out = Counter()
+    for h in holds:
+        x1, y1, x2, y2 = h.box
+        px = utils.select_region_pixels(
+            wb[max(0, y1):max(0, y2), max(0, x1):max(0, x2)], use_mask=use_mask)
+        name = cnw2c.name_pixels_bgr(px, w2c)
+        if naming == "w2c+cyan" and \
+                utils.nearest_color_name(h.lab, refs, chroma_min, rescue) == "cyan":
+            name = "cyan"
+        out[name] += 1
+    return out
 
 
 def main() -> None:
@@ -66,6 +90,8 @@ def main() -> None:
     parser.add_argument("--labels", default=os.path.join(PROJECT_ROOT, "eval", "labels.yaml"))
     parser.add_argument("--chroma-min", type=float, default=None,
                         help="Override color_naming.chroma_min for a sweep.")
+    parser.add_argument("--naming", choices=["hue", "w2c", "w2c+cyan"], default="hue",
+                        help="Color-name strategy to evaluate (default: hue).")
     args = parser.parse_args()
 
     with open(args.labels) as fh:
@@ -77,7 +103,7 @@ def main() -> None:
     input_dir = utils.resolve_path(config["paths"]["input_dir"])
     model = hd.load_detector(config["models"]["hold_detector"])
 
-    print(f"chroma_min={chroma_min}  min_holds={min_holds}\n")
+    print(f"chroma_min={chroma_min}  min_holds={min_holds}  naming={args.naming}\n")
     header = f"{'image':10} {'recall':>6} {'prec':>6}  {'missed':22} {'spurious'}"
     print(header)
     print("-" * len(header))
@@ -94,7 +120,7 @@ def main() -> None:
             continue
         image = load_upright_bgr(path)
         present = set(item["colors_present"])
-        counts = found_colors(image, model, config, chroma_min)
+        counts = found_colors(image, model, config, chroma_min, args.naming)
         found = {c for c, k in counts.items() if k >= min_holds and c not in ("unknown",)}
 
         hit = present & found
